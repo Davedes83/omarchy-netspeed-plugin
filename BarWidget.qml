@@ -8,13 +8,24 @@ BarWidget {
   id: root
   moduleName: "davedes.netspeed"
 
-  // Sample interval in ms, overridable via the shell.json layout entry
-  readonly property int sampleInterval: setting("interval", 1000)
-  // Label text size in px; falls back to the bar caption size when unset
-  readonly property int textSize: setting("fontSize", Style.font.caption)
   readonly property var sizeSteps: [10, 12, 14, 16, 18]
   readonly property int minSize: 8
   readonly property int maxSize: 28
+
+  // shell.json settings arrive as untyped JSON: reject non-numeric values
+  // and clamp the result before anything depends on it
+  function intSetting(name, fallback, min, max) {
+    var v = Number(setting(name))
+    if (!isFinite(v)) v = Number(fallback)
+    if (!isFinite(v)) v = min
+    return Math.max(min, Math.min(max, Math.round(v)))
+  }
+
+  // Sample interval in ms; floored at 250 so a zero/negative entry can't
+  // drive the poll timer into a busy loop
+  readonly property int sampleInterval: intSetting("interval", 1000, 250, 60000)
+  // Label text size in px; falls back to the bar caption size when unset
+  readonly property int textSize: intSetting("fontSize", Style.font.caption, minSize, maxSize)
   // Interface names to ignore (loopback and virtual bridges/veth pairs)
   readonly property var excludeRe: /^lo$|^docker\d*|^br-.+|^virbr\d*|^veth.*|^vboxnet\d*/i
 
@@ -85,7 +96,9 @@ BarWidget {
   }
 
   function setSize(px) {
-    var v = Math.max(minSize, Math.min(maxSize, Math.round(px)))
+    var v = Math.round(Number(px))
+    if (!isFinite(v)) return
+    v = Math.max(minSize, Math.min(maxSize, v))
     if (v === textSize) return
     // updateEntryInline replaces the entry's settings wholesale, so carry
     // every other key (interval etc.) over unchanged

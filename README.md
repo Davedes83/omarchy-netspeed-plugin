@@ -52,8 +52,8 @@ Edit the widget entry in your `~/.config/omarchy/shell.json`:
 ```
 
 **Settings:**
-- `interval` (ms) — Sample rate. Lower = more accurate but higher CPU (default: 1000)
-- `fontSize` (px) — Widget text size (default: bar caption size, range: 8–28px)
+- `interval` (ms) — Sample rate. Lower = more accurate but higher CPU (default: 1000). Clamped to 250–60000 ms; non-numeric or zero/negative values fall back to the default
+- `fontSize` (px) — Widget text size (default: bar caption size). Clamped to 8–28 px
 
 ### IPC Commands
 
