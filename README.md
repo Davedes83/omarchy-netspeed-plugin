@@ -1,3 +1,6 @@
+<img width="387" height="141" alt="screenshot-2026-08-24_19-03-47" src="https://github.com/user-attachments/assets/aa306b9a-1725-4e56-ba25-16757505372e" />
+
+
 # Net Speed Widget for Omarchy
 
 A real-time network speed widget for the Omarchy Quattro bar. Displays live download and upload speeds in your shell status bar.
