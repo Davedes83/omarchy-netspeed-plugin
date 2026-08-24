@@ -1,0 +1,19 @@
+{
+  "schemaVersion": 1,
+  "id": "davedes.netspeed",
+  "name": "Net Speed",
+  "version": "1.0.0",
+  "author": "davedes",
+  "description": "Live network download and upload speeds in the bar",
+  "kinds": ["bar-widget"],
+  "entryPoints": {
+    "barWidget": "BarWidget.qml"
+  },
+  "barWidget": {
+    "displayName": "Net Speed",
+    "description": "Live network download/upload speeds",
+    "category": "System",
+    "allowMultiple": false,
+    "defaultSection": "right"
+  }
+}

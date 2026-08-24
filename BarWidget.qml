@@ -1,0 +1,172 @@
+import QtQuick
+import Quickshell
+import Quickshell.Io
+import qs.Commons
+import qs.Ui
+
+BarWidget {
+  id: root
+  moduleName: "davedes.netspeed"
+
+  // Sample interval in ms, overridable via the shell.json layout entry
+  readonly property int sampleInterval: setting("interval", 1000)
+  // Label text size in px; falls back to the bar caption size when unset
+  readonly property int textSize: setting("fontSize", Style.font.caption)
+  readonly property var sizeSteps: [10, 12, 14, 16, 18]
+  readonly property int minSize: 8
+  readonly property int maxSize: 28
+  // Interface names to ignore (loopback and virtual bridges/veth pairs)
+  readonly property var excludeRe: /^lo$|^docker\d*|^br-.+|^virbr\d*|^veth.*|^vboxnet\d*/i
+
+  property real lastRx: -1
+  property real lastTx: -1
+  property real lastStamp: 0
+  property real downSpeed: -1
+  property real upSpeed: -1
+  property real totalRx: 0
+  property real totalTx: 0
+
+  readonly property bool ready: downSpeed >= 0
+  readonly property string label: ready
+    ? "\u2193 " + formatSpeed(downSpeed) + "  \u2191 " + formatSpeed(upSpeed)
+    : ""
+
+  function formatSpeed(bytesPerSec) {
+    if (bytesPerSec < 0) return "--"
+    var units = ["B", "KB", "MB", "GB", "TB"]
+    var v = bytesPerSec
+    var u = 0
+    while (v >= 1000 && u < units.length - 1) {
+      v /= 1000
+      u++
+    }
+    return (u === 0 ? Math.round(v) + " " : v.toFixed(1)) + units[u]
+  }
+
+  function parseSample(text) {
+    var lines = text.split("\n")
+    var rx = 0
+    var tx = 0
+    var seen = false
+    for (var i = 0; i < lines.length; i++) {
+      var line = lines[i]
+      var idx = line.indexOf(":")
+      if (idx < 0) continue
+      var name = line.substring(0, idx).trim()
+      if (!name || excludeRe.test(name)) continue
+      var f = line.substring(idx + 1).trim().split(/\s+/)
+      // /proc/net/dev: rx bytes packets ... | tx starts at field 8
+      if (f.length < 9) continue
+      rx += parseInt(f[0], 10) || 0
+      tx += parseInt(f[8], 10) || 0
+      seen = true
+    }
+    return seen ? { rx: rx, tx: tx } : null
+  }
+
+  function applySample(sample) {
+    if (!sample) return
+    totalRx = sample.rx
+    totalTx = sample.tx
+    var now = Date.now()
+    if (lastRx >= 0 && lastStamp > 0) {
+      var secs = Math.max((now - lastStamp) / 1000.0, 0.001)
+      // Counter reset (reboot/interface recreate) shows as a negative delta
+      downSpeed = Math.max((sample.rx - lastRx) / secs, 0)
+      upSpeed = Math.max((sample.tx - lastTx) / secs, 0)
+    }
+    lastRx = sample.rx
+    lastTx = sample.tx
+    lastStamp = now
+  }
+
+  function refresh() {
+    if (!sampleProc.running) sampleProc.running = true
+  }
+
+  function setSize(px) {
+    var v = Math.max(minSize, Math.min(maxSize, Math.round(px)))
+    if (v === textSize) return
+    // updateEntryInline replaces the entry's settings wholesale, so carry
+    // every other key (interval etc.) over unchanged
+    var next = {}
+    var cur = root.settings || {}
+    for (var k in cur) if (k !== "id" && k !== "fontSize") next[k] = cur[k]
+    next.fontSize = v
+    if (root.bar && root.bar.shell) root.bar.shell.updateEntryInline(root.moduleName, next)
+  }
+
+  function cycleSize() {
+    var steps = sizeSteps
+    for (var i = 0; i < steps.length; i++)
+      if (steps[i] === textSize) return setSize(steps[(i + 1) % steps.length])
+    // Current size is between presets: step up to the next one above it
+    for (var j = 0; j < steps.length; j++)
+      if (steps[j] > textSize) return setSize(steps[j])
+    return setSize(steps[0])
+  }
+
+  Component.onCompleted: refresh()
+
+  IpcHandler {
+    target: "davedes.netspeed"
+
+    function refresh(): void {
+      root.broadcast("refresh")
+    }
+
+    function fontSizeUp(): void {
+      root.setSize(root.textSize + 1)
+    }
+
+    function fontSizeDown(): void {
+      root.setSize(root.textSize - 1)
+    }
+
+    function setFontSize(px: int): void {
+      root.setSize(px)
+    }
+  }
+
+  Process {
+    id: sampleProc
+    command: ["cat", "/proc/net/dev"]
+    stdout: StdioCollector {
+      waitForEnd: true
+      onStreamFinished: root.applySample(root.parseSample(text))
+    }
+  }
+
+  Timer {
+    interval: root.sampleInterval
+    running: true
+    repeat: true
+    triggeredOnStart: false
+    onTriggered: root.refresh()
+  }
+
+  visible: ready
+  implicitWidth: button.implicitWidth
+  implicitHeight: button.implicitHeight
+
+  WidgetButton {
+    id: button
+    anchors.fill: parent
+    bar: root.bar
+    text: root.label
+    fontSize: root.textSize
+    tooltipText: root.ready
+      ? "\u2193 " + root.formatSpeed(root.downSpeed) + "   \u2191 " + root.formatSpeed(root.upSpeed)
+        + "\nTotal \u2193 " + root.formatSpeed(root.totalRx) + "  \u2191 " + root.formatSpeed(root.totalTx)
+        + "\nClick: resize \u2022 Scroll: fine-tune"
+      : ""
+    onPressed: function(b) {
+      if (b === Qt.LeftButton) root.cycleSize()
+      else if (b === Qt.MiddleButton) root.refresh()
+      else if (root.bar) root.bar.run("omarchy-shell shell toggle omarchy.network")
+    }
+    onWheelMoved: function(delta) {
+      root.setSize(root.textSize + (delta > 0 ? 1 : -1))
+    }
+  }
+}
