@@ -1,4 +1,5 @@
-<img width="864" height="347" alt="screenshot-2026-08-24_20-33-45" src="https://github.com/user-attachments/assets/23ef7ab0-71de-4931-bb7f-5ad58ba26c3e" />
+<img width="1600" height="980" alt="netspeed-promo" src="https://github.com/user-attachments/assets/1eac568b-38f5-4cbf-9a62-0d5a9b6429c3" />
+
 
 
 # Net Speed Widget for Omarchy
