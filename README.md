@@ -1,4 +1,4 @@
-<img width="1451" height="611" alt="Net Speed Plugin" src="https://github.com/user-attachments/assets/259dbfa6-5b22-445c-ae0c-bd42a5ae8901" />
+<img width="1415" height="502" alt="Net Speed Plugin" src="https://github.com/user-attachments/assets/fc120d1b-003f-4a8d-85a0-63be6bbf47e2" />
 
 
 # Net Speed Widget for Omarchy
