@@ -54,23 +54,30 @@ BarWidget {
     return (u === 0 ? Math.round(v) + " " : v.toFixed(1)) + units[u]
   }
 
+  readonly property int maxInterfaces: 32
+  readonly property int maxFieldLen: 20
+
   function parseSample(text) {
     var lines = text.split("\n")
     var rx = 0
     var tx = 0
     var seen = false
+    var ifaceCount = 0
     for (var i = 0; i < lines.length; i++) {
+      if (ifaceCount >= maxInterfaces) break
       var line = lines[i]
       var idx = line.indexOf(":")
       if (idx < 0) continue
       var name = line.substring(0, idx).trim()
       if (!name || excludeRe.test(name)) continue
       var f = line.substring(idx + 1).trim().split(/\s+/)
-      // /proc/net/dev: rx bytes packets ... | tx starts at field 8
       if (f.length < 9) continue
-      rx += parseInt(f[0], 10) || 0
-      tx += parseInt(f[8], 10) || 0
+      var rxB = f[0].length > maxFieldLen ? f[0].substring(0, maxFieldLen) : f[0]
+      var txB = f[8].length > maxFieldLen ? f[8].substring(0, maxFieldLen) : f[8]
+      rx += parseInt(rxB, 10) || 0
+      tx += parseInt(txB, 10) || 0
       seen = true
+      ifaceCount++
     }
     return seen ? { rx: rx, tx: tx } : null
   }
@@ -143,7 +150,7 @@ BarWidget {
 
   Process {
     id: sampleProc
-    command: ["cat", "/proc/net/dev"]
+    command: ["sh", "-c", "head -n 34 /proc/net/dev | head -c 4096"]
     stdout: StdioCollector {
       waitForEnd: true
       onStreamFinished: root.applySample(root.parseSample(text))
