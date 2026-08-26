@@ -34,8 +34,13 @@ BarWidget {
   property real lastStamp: 0
   property real downSpeed: -1
   property real upSpeed: -1
+  property real smoothDown: -1
+  property real smoothUp: -1
   property real totalRx: 0
   property real totalTx: 0
+
+  // Per-interface breakdown for tooltip
+  property var ifaceSpeeds: []
 
   // Cached formatted speed strings to avoid recomputation
   property string cachedDownSpeedStr: "--"
@@ -53,8 +58,8 @@ BarWidget {
     var units = ["B", "KB", "MB", "GB", "TB"]
     var v = bytesPerSec
     var u = 0
-    while (v >= 1000 && u < units.length - 1) {
-      v /= 1000
+    while (v >= 1024 && u < units.length - 1) {
+      v /= 1024
       u++
     }
     return (u === 0 ? Math.round(v) + " " : v.toFixed(1)) + units[u]
@@ -66,6 +71,7 @@ BarWidget {
     var lines = text.split("\n")
     var rx = 0
     var tx = 0
+    var ifaces = []
     var ifaceCount = 0
     for (var i = 0; i < lines.length && ifaceCount < maxInterfaces; i++) {
       var line = lines[i]
@@ -75,12 +81,14 @@ BarWidget {
       if (!name || excludeRe.test(name)) continue
       var parts = line.substring(idx + 1).trim().split(/\s+/)
       if (parts.length < 9) continue
-      // Parse directly without substring truncation—parseInt handles overflow
-      rx += parseInt(parts[0], 10) || 0
-      tx += parseInt(parts[8], 10) || 0
+      var ifaceRx = parseInt(parts[0], 10) || 0
+      var ifaceTx = parseInt(parts[8], 10) || 0
+      rx += ifaceRx
+      tx += ifaceTx
+      ifaces.push({ name: name, rx: ifaceRx, tx: ifaceTx })
       ifaceCount++
     }
-    return ifaceCount > 0 ? { rx: rx, tx: tx } : null
+    return ifaceCount > 0 ? { rx: rx, tx: tx, ifaces: ifaces } : null
   }
 
   function applySample(sample) {
@@ -95,9 +103,35 @@ BarWidget {
       // Counter reset (reboot/interface recreate) shows as a negative delta
       downSpeed = Math.max((sample.rx - lastRx) / secs, 0)
       upSpeed = Math.max((sample.tx - lastTx) / secs, 0)
-      cachedDownSpeedStr = formatSpeed(downSpeed)
-      cachedUpSpeedStr = formatSpeed(upSpeed)
+      // EMA smoothing (alpha = 0.3)
+      if (smoothDown < 0) {
+        smoothDown = downSpeed
+        smoothUp = upSpeed
+      } else {
+        smoothDown = 0.3 * downSpeed + 0.7 * smoothDown
+        smoothUp = 0.3 * upSpeed + 0.7 * smoothUp
+      }
+      cachedDownSpeedStr = formatSpeed(smoothDown)
+      cachedUpSpeedStr = formatSpeed(smoothUp)
     }
+    // Per-interface speed breakdown (raw delta, not smoothed)
+    var prevIfaces = ifaceSpeeds
+    var newIfaces = []
+    for (var i = 0; i < sample.ifaces.length; i++) {
+      var iface = sample.ifaces[i]
+      var prev = null
+      for (var j = 0; j < prevIfaces.length; j++) {
+        if (prevIfaces[j].name === iface.name) { prev = prevIfaces[j]; break }
+      }
+      var dRx = 0, dTx = 0
+      if (prev && lastStamp > 0) {
+        var isecs = Math.max((now - lastStamp) / 1000.0, 0.001)
+        dRx = Math.max((iface.rx - prev.rx) / isecs, 0)
+        dTx = Math.max((iface.tx - prev.tx) / isecs, 0)
+      }
+      newIfaces.push({ name: iface.name, down: dRx, up: dTx })
+    }
+    ifaceSpeeds = newIfaces
     lastRx = sample.rx
     lastTx = sample.tx
     lastStamp = now
@@ -112,12 +146,9 @@ BarWidget {
     if (!isFinite(v)) return
     v = Math.max(minSize, Math.min(maxSize, v))
     if (v === textSize) return
-    // Create a shallow copy of settings, preserving all keys except fontSize
-    var cur = root.settings || {}
-    var next = {}
-    for (var k in cur) {
-      if (k !== "id" && k !== "fontSize") next[k] = cur[k]
-    }
+    var next = Object.assign({}, root.settings)
+    delete next.id
+    delete next.fontSize
     next.fontSize = v
     if (root.bar && root.bar.shell) root.bar.shell.updateEntryInline(root.moduleName, next)
   }
@@ -156,7 +187,7 @@ BarWidget {
 
   Process {
     id: sampleProc
-    command: ["sh", "-c", "head -n 34 /proc/net/dev | head -c 4096"]
+    command: ["sh", "-c", "head -c 4096 /proc/net/dev"]
     stdout: StdioCollector {
       waitForEnd: true
       onStreamFinished: root.applySample(root.parseSample(text))
@@ -181,11 +212,20 @@ BarWidget {
     bar: root.bar
     text: root.label
     fontSize: root.textSize
-    tooltipText: root.ready
-      ? "\u2193 " + root.cachedDownSpeedStr + "   \u2191 " + root.cachedUpSpeedStr
+    tooltipText: {
+      if (!root.ready) return ""
+      var tip = "\u2193 " + root.cachedDownSpeedStr + "   \u2191 " + root.cachedUpSpeedStr
         + "\nTotal \u2193 " + root.cachedTotalRxStr + "  \u2191 " + root.cachedTotalTxStr
-        + "\nClick: resize \u2022 Scroll: fine-tune"
-      : ""
+      // Per-interface breakdown
+      var ifaces = root.ifaceSpeeds
+      for (var i = 0; i < ifaces.length; i++) {
+        var f = ifaces[i]
+        if (f.down > 0 || f.up > 0)
+          tip += "\n  " + f.name + ": \u2193 " + root.formatSpeed(f.down) + "  \u2191 " + root.formatSpeed(f.up)
+      }
+      tip += "\nClick: resize \u2022 Scroll: fine-tune \u2022 Middle: refresh \u2022 Right: network"
+      return tip
+    }
     onPressed: function(b) {
       if (b === Qt.LeftButton) root.cycleSize()
       else if (b === Qt.MiddleButton) root.refresh()
