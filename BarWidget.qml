@@ -23,7 +23,7 @@ BarWidget {
 
   // Sample interval in ms; floored at 250 so a zero/negative entry can't
   // drive the poll timer into a busy loop
-  readonly property int sampleInterval: intSetting("interval", 1000, 250, 60000)
+  readonly property int sampleInterval: intSetting("interval", 2000, 250, 60000)
   // Label text size in px; falls back to the bar caption size when unset
   readonly property int textSize: intSetting("fontSize", Style.font.caption, minSize, maxSize)
   // Interface names to ignore (loopback and virtual bridges/veth pairs)
@@ -37,9 +37,15 @@ BarWidget {
   property real totalRx: 0
   property real totalTx: 0
 
+  // Cached formatted speed strings to avoid recomputation
+  property string cachedDownSpeedStr: "--"
+  property string cachedUpSpeedStr: "--"
+  property string cachedTotalRxStr: "--"
+  property string cachedTotalTxStr: "--"
+
   readonly property bool ready: downSpeed >= 0
   readonly property string label: ready
-    ? "\u2193 " + formatSpeed(downSpeed) + "  \u2191 " + formatSpeed(upSpeed)
+    ? "\u2193 " + cachedDownSpeedStr + "  \u2191 " + cachedUpSpeedStr
     : ""
 
   function formatSpeed(bytesPerSec) {
@@ -55,43 +61,42 @@ BarWidget {
   }
 
   readonly property int maxInterfaces: 32
-  readonly property int maxFieldLen: 20
 
   function parseSample(text) {
     var lines = text.split("\n")
     var rx = 0
     var tx = 0
-    var seen = false
     var ifaceCount = 0
-    for (var i = 0; i < lines.length; i++) {
-      if (ifaceCount >= maxInterfaces) break
+    for (var i = 0; i < lines.length && ifaceCount < maxInterfaces; i++) {
       var line = lines[i]
       var idx = line.indexOf(":")
       if (idx < 0) continue
       var name = line.substring(0, idx).trim()
       if (!name || excludeRe.test(name)) continue
-      var f = line.substring(idx + 1).trim().split(/\s+/)
-      if (f.length < 9) continue
-      var rxB = f[0].length > maxFieldLen ? f[0].substring(0, maxFieldLen) : f[0]
-      var txB = f[8].length > maxFieldLen ? f[8].substring(0, maxFieldLen) : f[8]
-      rx += parseInt(rxB, 10) || 0
-      tx += parseInt(txB, 10) || 0
-      seen = true
+      var parts = line.substring(idx + 1).trim().split(/\s+/)
+      if (parts.length < 9) continue
+      // Parse directly without substring truncation—parseInt handles overflow
+      rx += parseInt(parts[0], 10) || 0
+      tx += parseInt(parts[8], 10) || 0
       ifaceCount++
     }
-    return seen ? { rx: rx, tx: tx } : null
+    return ifaceCount > 0 ? { rx: rx, tx: tx } : null
   }
 
   function applySample(sample) {
     if (!sample) return
     totalRx = sample.rx
     totalTx = sample.tx
+    cachedTotalRxStr = formatSpeed(totalRx)
+    cachedTotalTxStr = formatSpeed(totalTx)
     var now = Date.now()
     if (lastRx >= 0 && lastStamp > 0) {
       var secs = Math.max((now - lastStamp) / 1000.0, 0.001)
       // Counter reset (reboot/interface recreate) shows as a negative delta
       downSpeed = Math.max((sample.rx - lastRx) / secs, 0)
       upSpeed = Math.max((sample.tx - lastTx) / secs, 0)
+      cachedDownSpeedStr = formatSpeed(downSpeed)
+      cachedUpSpeedStr = formatSpeed(upSpeed)
     }
     lastRx = sample.rx
     lastTx = sample.tx
@@ -107,11 +112,12 @@ BarWidget {
     if (!isFinite(v)) return
     v = Math.max(minSize, Math.min(maxSize, v))
     if (v === textSize) return
-    // updateEntryInline replaces the entry's settings wholesale, so carry
-    // every other key (interval etc.) over unchanged
-    var next = {}
+    // Create a shallow copy of settings, preserving all keys except fontSize
     var cur = root.settings || {}
-    for (var k in cur) if (k !== "id" && k !== "fontSize") next[k] = cur[k]
+    var next = {}
+    for (var k in cur) {
+      if (k !== "id" && k !== "fontSize") next[k] = cur[k]
+    }
     next.fontSize = v
     if (root.bar && root.bar.shell) root.bar.shell.updateEntryInline(root.moduleName, next)
   }
@@ -176,8 +182,8 @@ BarWidget {
     text: root.label
     fontSize: root.textSize
     tooltipText: root.ready
-      ? "\u2193 " + root.formatSpeed(root.downSpeed) + "   \u2191 " + root.formatSpeed(root.upSpeed)
-        + "\nTotal \u2193 " + root.formatSpeed(root.totalRx) + "  \u2191 " + root.formatSpeed(root.totalTx)
+      ? "\u2193 " + root.cachedDownSpeedStr + "   \u2191 " + root.cachedUpSpeedStr
+        + "\nTotal \u2193 " + root.cachedTotalRxStr + "  \u2191 " + root.cachedTotalTxStr
         + "\nClick: resize \u2022 Scroll: fine-tune"
       : ""
     onPressed: function(b) {
