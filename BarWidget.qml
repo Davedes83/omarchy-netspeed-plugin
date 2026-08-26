@@ -203,9 +203,6 @@ BarWidget {
       waitForEnd: true
       onStreamFinished: root.applySample(root.parseSample(text))
     }
-    onError: {
-      console.warn("davedes.netspeed: failed to read /proc/net/dev:", error)
-    }
   }
 
   Timer {
