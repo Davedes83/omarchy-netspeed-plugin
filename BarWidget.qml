@@ -55,8 +55,20 @@ BarWidget {
 
   function formatSpeed(bytesPerSec) {
     if (bytesPerSec < 0) return "--"
-    var units = ["B", "KB", "MB", "GB", "TB"]
+    var units = ["B/s", "KiB/s", "MiB/s", "GiB/s", "TiB/s"]
     var v = bytesPerSec
+    var u = 0
+    while (v >= 1024 && u < units.length - 1) {
+      v /= 1024
+      u++
+    }
+    return (u === 0 ? Math.round(v) + " " : v.toFixed(1)) + units[u]
+  }
+
+  function formatTotal(bytes) {
+    if (bytes < 0) return "--"
+    var units = ["B", "KiB", "MiB", "GiB", "TiB"]
+    var v = bytes
     var u = 0
     while (v >= 1024 && u < units.length - 1) {
       v /= 1024
@@ -95,8 +107,8 @@ BarWidget {
     if (!sample) return
     totalRx = sample.rx
     totalTx = sample.tx
-    cachedTotalRxStr = formatSpeed(totalRx)
-    cachedTotalTxStr = formatSpeed(totalTx)
+    cachedTotalRxStr = formatTotal(totalRx)
+    cachedTotalTxStr = formatTotal(totalTx)
     var now = Date.now()
     if (lastRx >= 0 && lastStamp > 0) {
       var secs = Math.max((now - lastStamp) / 1000.0, 0.001)
@@ -116,13 +128,14 @@ BarWidget {
     }
     // Per-interface speed breakdown (raw delta, not smoothed)
     var prevIfaces = ifaceSpeeds
+    var prevMap = {}
+    for (var j = 0; j < prevIfaces.length; j++) {
+      prevMap[prevIfaces[j].name] = prevIfaces[j]
+    }
     var newIfaces = []
     for (var i = 0; i < sample.ifaces.length; i++) {
       var iface = sample.ifaces[i]
-      var prev = null
-      for (var j = 0; j < prevIfaces.length; j++) {
-        if (prevIfaces[j].name === iface.name) { prev = prevIfaces[j]; break }
-      }
+      var prev = prevMap[iface.name] || null
       var dRx = 0, dTx = 0
       if (prev && lastStamp > 0) {
         var isecs = Math.max((now - lastStamp) / 1000.0, 0.001)
@@ -146,11 +159,9 @@ BarWidget {
     if (!isFinite(v)) return
     v = Math.max(minSize, Math.min(maxSize, v))
     if (v === textSize) return
-    var next = Object.assign({}, root.settings)
-    delete next.id
-    delete next.fontSize
-    next.fontSize = v
-    if (root.bar && root.bar.shell) root.bar.shell.updateEntryInline(root.moduleName, next)
+    if (root.bar && root.bar.shell) {
+      root.bar.shell.updateEntryInline(root.moduleName, { fontSize: v })
+    }
   }
 
   function cycleSize() {
@@ -187,10 +198,13 @@ BarWidget {
 
   Process {
     id: sampleProc
-    command: ["sh", "-c", "head -c 4096 /proc/net/dev"]
+    command: ["sh", "-c", "cat /proc/net/dev"]
     stdout: StdioCollector {
       waitForEnd: true
       onStreamFinished: root.applySample(root.parseSample(text))
+    }
+    onError: {
+      console.warn("davedes.netspeed: failed to read /proc/net/dev:", error)
     }
   }
 

@@ -9,7 +9,7 @@ A real-time network speed widget for the Omarchy Quattro bar. Displays live down
 
 - **Live Speed Monitoring** — Real-time download and upload speeds from `/proc/net/dev`
 - **Smoothed Display** — Exponential moving average prevents jittery speed numbers
-- **Smart Formatting** — Auto-scales from B/s to TB/s (binary units)
+- **Smart Formatting** — Auto-scales from B/s to TiB/s (binary units: KiB, MiB, GiB, TiB)
 - **Configurable Interval** — Adjust sampling rate via settings (default: 2000ms)
 - **Resizable Font** — Left-click to cycle through preset sizes, or scroll to fine-tune
 - **Total Counters** — Hover for cumulative RX/TX totals and per-interface breakdown
@@ -76,10 +76,21 @@ omarchy shell send davedes.netspeed refresh
 ## How It Works
 
 1. **Reads** `/proc/net/dev` every `interval` milliseconds
-2. **Filters** loopback, Docker, and virtual interfaces
+2. **Filters** loopback, Docker, and virtual interfaces (see [Excluded Interfaces](#excluded-interfaces))
 3. **Calculates** deltas from the previous sample
 4. **Smooths** speed values with an exponential moving average
-5. **Formats** as human-readable speeds (B/s, KB/s, MB/s, etc.)
+5. **Formats** as human-readable speeds (B/s, KiB/s, MiB/s, etc.)
+
+### Excluded Interfaces
+
+The following interface patterns are excluded from monitoring (case-insensitive):
+
+- `lo` — Loopback
+- `docker*` — Docker bridges
+- `br-*` — Linux bridges
+- `virbr*` — libvirt bridges
+- `veth*` — Virtual Ethernet pairs
+- `vboxnet*` — VirtualBox host-only networks
 
 ## Troubleshooting
 
