@@ -2,6 +2,13 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.2.1] - 2026-08-29
+
+### Security
+- **Process**: Restored the hard output cap (`head -n 34 | head -c 4096`) on `/proc/net/dev` produced per sample
+- **parseSample**: Restored the per-field length budget before integer parsing
+- **sanitizeLabel**: Interface names are now stripped of rich-text angle brackets and control characters before entering the shell tooltip
+
 ## [1.2.0] - 2026-08-26
 
 ### Changed

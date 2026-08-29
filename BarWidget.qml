@@ -78,6 +78,13 @@ BarWidget {
   }
 
   readonly property int maxInterfaces: 32
+  readonly property int maxFieldLen: 20
+
+  // Interface names are kernel-controlled input: strip rich-text and
+  // control characters before any value reaches the shell tooltip
+  function sanitizeLabel(value) {
+    return String(value).replace(/[<>]/g, "").replace(/[\u0000-\u001F\u007F]/g, " ")
+  }
 
   function parseSample(text) {
     var lines = text.split("\n")
@@ -93,11 +100,14 @@ BarWidget {
       if (!name || excludeRe.test(name)) continue
       var parts = line.substring(idx + 1).trim().split(/\s+/)
       if (parts.length < 9) continue
-      var ifaceRx = parseInt(parts[0], 10) || 0
-      var ifaceTx = parseInt(parts[8], 10) || 0
+      var rxRaw = parts[0].length > maxFieldLen ? parts[0].substring(0, maxFieldLen) : parts[0]
+      var txRaw = parts[8].length > maxFieldLen ? parts[8].substring(0, maxFieldLen) : parts[8]
+      var ifaceRx = parseInt(rxRaw, 10) || 0
+      var ifaceTx = parseInt(txRaw, 10) || 0
       rx += ifaceRx
       tx += ifaceTx
-      ifaces.push({ name: name, rx: ifaceRx, tx: ifaceTx })
+      var safeName = sanitizeLabel(name)
+      if (safeName) ifaces.push({ name: safeName, rx: ifaceRx, tx: ifaceTx })
       ifaceCount++
     }
     return ifaceCount > 0 ? { rx: rx, tx: tx, ifaces: ifaces } : null
@@ -198,7 +208,7 @@ BarWidget {
 
   Process {
     id: sampleProc
-    command: ["sh", "-c", "cat /proc/net/dev"]
+    command: ["sh", "-c", "head -n 34 /proc/net/dev | head -c 4096"]
     stdout: StdioCollector {
       waitForEnd: true
       onStreamFinished: root.applySample(root.parseSample(text))
