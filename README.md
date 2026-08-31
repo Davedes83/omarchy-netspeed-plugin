@@ -113,6 +113,9 @@ MIT License — See LICENSE for details.
 
 Found a bug or have a feature idea? Open an issue on GitHub.
 
+## Buy Me A Coffee
+PayPal @DavidDesousa13
+
 ---
 
 Made with ❤ for Omarchy
