@@ -1,7 +1,7 @@
 <img width="967" height="502" alt="Net Speed Plugin" src="https://github.com/user-attachments/assets/a8fb7575-3669-4524-9e7c-c20219e98e98" />
 
 
-<a href="https://paypal.me/DavidDesousa13"><img src="https://cdn.buymeacoffee.com/buttons/v2/default-yellow.png" alt="Buy Me A Coffee" height="40px"></a>
+<a href="https://paypal.me/DavidDesousa13"><img src="https://www.paypalobjects.com/digitalassets/c/website/marketing/apac/Creative_Design_Library/Web_PayPal_Buy_Now_Button/Web_PayPal_Buy_Now_Button.png" alt="Donate with PayPal" height="40px"></a>
 
 
 # Net Speed Widget for Omarchy
