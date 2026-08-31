@@ -1,6 +1,9 @@
 <img width="967" height="502" alt="Net Speed Plugin" src="https://github.com/user-attachments/assets/a8fb7575-3669-4524-9e7c-c20219e98e98" />
 
 
+<a href="https://paypal.me/DavidDesousa13"><img src="https://cdn.buymeacoffee.com/buttons/v2/default-yellow.png" alt="Buy Me A Coffee" height="40px"></a>
+
+
 # Net Speed Widget for Omarchy
 
 A real-time network speed widget for the Omarchy Quattro bar. Displays live download and upload speeds in your shell status bar.
@@ -112,9 +115,6 @@ MIT License — See LICENSE for details.
 ## Feedback
 
 Found a bug or have a feature idea? Open an issue on GitHub.
-
-## Buy Me A Coffee
-PayPal @DavidDesousa13
 
 ---
 
