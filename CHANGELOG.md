@@ -2,6 +2,25 @@
 
 All notable changes to this project will be documented in this file.
 
+## [2.0.0] - 2026-09-06
+
+### Added
+- **Theme-aware dropdown** — The whole panel (hero, chart, rows, buttons) is coloured entirely from the active Omarchy theme (accent/muted tones, no hardcoded hex colours)
+- **Hero** — Connection name, live state label, and refresh/close buttons
+- **Chart window selector** — 5 / 15 / 30-minute pills; the axis always spans the full selected window with live data right-aligned at the edge
+- **30-minute history buffer** — History length scales with the configured sample interval
+- **NETWORK section** — Full connection details from `nmcli`/`ip`/`iw`: connection, interface, type, SSID, signal, band, live link rate, security, IP, gateway, DNS, status, MAC, MTU, DHCP lease, driver, metered flag
+- **PER-APP USAGE** — Live down/up rates plus session totals and connection counts per app, with column headings (`APP`, `CONN`, `LIVE RATE`, `THIS SESSION`)
+
+### Fixed
+- **Per-app uploads misread** — `ss -i` inserts a `bytes_retrans:` field when a connection retransmits, which the parser required between `bytes_sent` and `bytes_acked`; upload-heavy sockets read as 0 in/out. Parser now matches `bytes_sent`/`bytes_received` order-independently
+- **Per-app never populated** — `property var X: {}` object-literal initialisers were dropped by the QML engine (leaving `appCum`/`prevConn` undefined so the `ss` handler returned early); initialised with `({})`
+- **Per-app burst loss** — ss poll interval lowered from 3s to 1.5s so short-lived streams are more likely to span a sample
+
+### Changed
+- Panel content height now autosizes (`fittedContentHeight`) instead of a fixed 660px
+- Removed the redundant INTERFACES section; BAND and LINK RATE split into their own rows
+
 ## [1.2.1] - 2026-08-29
 
 ### Security

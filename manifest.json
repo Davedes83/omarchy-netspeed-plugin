@@ -2,9 +2,9 @@
   "schemaVersion": 1,
   "id": "davedes.netspeed",
   "name": "Net Speed",
-  "version": "1.2.1",
+  "version": "2.0.0",
   "author": "davedes",
-  "description": "Live network download and upload speeds in the bar",
+  "description": "Live network download and upload speeds in the bar with a details dropdown (traffic chart, connection info, per-interface and per-app usage)",
   "kinds": ["bar-widget"],
   "entryPoints": {
     "barWidget": "BarWidget.qml"

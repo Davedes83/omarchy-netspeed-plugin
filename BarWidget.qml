@@ -3,6 +3,7 @@ import Quickshell
 import Quickshell.Io
 import qs.Commons
 import qs.Ui
+import "Model.js" as Model
 
 BarWidget {
   id: root
@@ -41,6 +42,17 @@ BarWidget {
 
   // Per-interface breakdown for tooltip
   property var ifaceSpeeds: []
+
+  // Continuous-usage state. One sampler (sampleProc below) feeds both the bar
+  // label and the dropdown panel; the panel binds to these instead of owning
+  // its own /proc/net/dev reads. History survives hot reloads that leave the
+  // widget instance in place, and "session" is this widget's lifetime.
+  property var history: []           // [{down, up}, ...] newest last
+  readonly property var ifaceRates: ifaceSpeeds
+  property real sessionDown: 0       // bytes attributed this session
+  property real sessionUp: 0
+  // Enough samples for the panel's longest (30 min) chart window at any interval.
+  readonly property int historyMax: Math.ceil(30 * 60 * 1000 / sampleInterval) + 1
 
   // Cached formatted speed strings to avoid recomputation
   property string cachedDownSpeedStr: "--"
@@ -135,6 +147,12 @@ BarWidget {
       }
       cachedDownSpeedStr = formatSpeed(smoothDown)
       cachedUpSpeedStr = formatSpeed(smoothUp)
+
+      // Continuous usage: session totals + the history chart use the raw
+      // aggregate delta between samples, not the smoothed label value.
+      history = Model.pushHistory(history, { down: downSpeed, up: upSpeed, t: now / 1000 }, historyMax)
+      sessionDown += downSpeed * secs
+      sessionUp += upSpeed * secs
     }
     // Per-interface speed breakdown (raw delta, not smoothed)
     var prevIfaces = ifaceSpeeds
@@ -161,7 +179,52 @@ BarWidget {
   }
 
   function refresh() {
-    if (!sampleProc.running) sampleProc.running = true
+    sampleProc.running = true
+    if (panelLoader.item && panelLoader.item.refresh) panelLoader.item.refresh()
+  }
+
+  // ---- Details dropdown. Shape contract for shell.summon/hide/toggle
+  //      and for Bar.findPanelWidget (open/close/opened on the widget root).
+  readonly property bool opened: panelLoader.item ? panelLoader.item.opened === true : false
+
+  function open() {
+    if (panelLoader.item) panelLoader.item.open()
+  }
+
+  function close() {
+    if (panelLoader.item) panelLoader.item.close()
+  }
+
+  function togglePanel() {
+    if (panelLoader.item) panelLoader.item.toggle()
+  }
+
+  // The slot fills more than the bar paints for a mark: it's a padded text
+  // label, so the open-panel dot takes the label width.
+  readonly property real openPanelIndicatorWidth: button.labelWidth
+  readonly property real openPanelIndicatorHeight: Math.max(Style.space(10), Math.round(Style.bar.iconSlot * 0.55))
+
+  function injectPanel() {
+    var target = panelLoader.item
+    if (!target) return
+    if ("bar" in target) target.bar = root.bar
+    if ("settings" in target) target.settings = root.settings
+    if ("anchorItem" in target) target.anchorItem = button
+    if ("hostWidget" in target) target.hostWidget = root
+  }
+
+  onBarChanged: injectPanel()
+  onSettingsChanged: injectPanel()
+
+  Loader {
+    id: panelLoader
+    active: true
+    source: Qt.resolvedUrl("Panel.qml")
+    visible: false
+    onLoaded: {
+      root.injectPanel()
+      Qt.callLater(root.injectPanel)
+    }
   }
 
   function setSize(px) {
@@ -204,6 +267,12 @@ BarWidget {
     function setFontSize(px: int): void {
       root.setSize(px)
     }
+
+    function open(): void { root.open() }
+    function close(): void { root.close() }
+    function show(): void { root.open() }
+    function hide(): void { root.close() }
+    function toggle(): void { root.togglePanel() }
   }
 
   Process {
@@ -244,11 +313,11 @@ BarWidget {
         if (f.down > 0 || f.up > 0)
           tip += "\n  " + f.name + ": \u2193 " + root.formatSpeed(f.down) + "  \u2191 " + root.formatSpeed(f.up)
       }
-      tip += "\nClick: resize \u2022 Scroll: fine-tune \u2022 Middle: refresh \u2022 Right: network"
+      tip += "\nLeft: details \u2022 Scroll: fine-tune \u2022 Middle: refresh \u2022 Right: network"
       return tip
     }
     onPressed: function(b) {
-      if (b === Qt.LeftButton) root.cycleSize()
+      if (b === Qt.LeftButton) root.togglePanel()
       else if (b === Qt.MiddleButton) root.refresh()
       else if (root.bar) root.bar.run("omarchy-shell shell toggle omarchy.network")
     }

@@ -6,7 +6,7 @@
 
 # Net Speed Widget for Omarchy
 
-A real-time network speed widget for the Omarchy Quattro bar. Displays live download and upload speeds in your shell status bar.
+A real-time network speed widget for the Omarchy bar. Shows live download and upload speeds in your shell status bar, with a themed details dropdown covering the traffic chart, connection details, and per-app usage.
 
 ## Features
 
@@ -14,8 +14,13 @@ A real-time network speed widget for the Omarchy Quattro bar. Displays live down
 - **Smoothed Display** — Exponential moving average prevents jittery speed numbers
 - **Smart Formatting** — Auto-scales from B/s to TiB/s (binary units: KiB, MiB, GiB, TiB)
 - **Configurable Interval** — Adjust sampling rate via settings (default: 2000ms)
-- **Resizable Font** — Left-click to cycle through preset sizes, or scroll to fine-tune
+- **Resizable Font** — Scroll to fine-tune the widget font size
 - **Total Counters** — Hover for cumulative RX/TX totals and per-interface breakdown
+- **Theme-Aware Dropdown** — One click opens a fully Omarchy-styled panel coloured entirely from your active theme (no hardcoded colours):
+  - **Hero** — Connection name, live state (e.g. CONNECTED), and refresh/close buttons
+  - **Live Throughput Chart** — Stacked down/up traffic with a **5 / 15 / 30-minute window selector**
+  - **Connection Details** — SSID, signal, band, `iw` link rate, security, IP, gateway, DNS, status, MAC, MTU, DHCP lease, driver, metered flag
+  - **Per-App Usage** — Live down/up rates + session totals and connection counts per app (TCP socket attribution)
 - **IPC Controls** — Programmatic control via `omarchy shell` commands
 
 ## Installation
@@ -35,10 +40,11 @@ The widget appears in the right section of your bar by default. No configuration
 
 ### Interactions
 
-- **Left-click** — Cycle through font sizes (10, 12, 14, 16, 18px)
+- **Left-click** — Toggle the details dropdown panel
 - **Middle-click** — Force refresh the speed sample
 - **Right-click** — Open Omarchy network settings
 - **Scroll up/down** — Fine-tune font size by ±1px
+- **Esc** — Close the dropdown (standard Omarchy keyboard-panel behaviour)
 
 ### Customization
 
@@ -59,8 +65,14 @@ Edit the widget entry in your `~/.config/omarchy/shell.json`:
 ```
 
 **Settings:**
-- `interval` (ms) — Sample rate. Lower = more accurate but higher CPU (default: 2000). Clamped to 250–60000 ms; non-numeric or zero/negative values fall back to the default
+- `interval` (ms) — Sample rate (bar + chart). Lower = more accurate but higher CPU (default: 2000). Clamped to 250–60000 ms; non-numeric or zero/negative values fall back to the default
 - `fontSize` (px) — Widget text size (default: bar caption size). Clamped to 8–28 px
+
+### Per-App Usage notes
+
+- Speeds and session totals come from live TCP sockets sampled via `ss` (default every 1.5s)
+- Totals accumulate for the current session and reset when the shell/widget restarts
+- Only TCP sockets are attributed; QUIC/UDP traffic (e.g. YouTube or Google over HTTP/3) is not visible per-app, so apps doing heavy QUIC can look quiet while the bar still shows the real throughput
 
 ### IPC Commands
 
@@ -74,6 +86,11 @@ omarchy shell send davedes.netspeed setFontSize 14
 
 # Force refresh
 omarchy shell send davedes.netspeed refresh
+
+# Open / close the details dropdown
+omarchy shell send davedes.netspeed open
+omarchy shell send davedes.netspeed close
+omarchy shell send davedes.netspeed toggle
 ```
 
 ## How It Works
@@ -83,6 +100,7 @@ omarchy shell send davedes.netspeed refresh
 3. **Calculates** deltas from the previous sample
 4. **Smooths** speed values with an exponential moving average
 5. **Formats** as human-readable speeds (B/s, KiB/s, MiB/s, etc.)
+6. **Dropdown** — connection details come from `nmcli`/`ip`/`iw`, per-app usage from `ss -tinp`
 
 ### Excluded Interfaces
 
