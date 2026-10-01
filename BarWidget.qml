@@ -27,8 +27,10 @@ BarWidget {
   readonly property int sampleInterval: intSetting("interval", 2000, 250, 60000)
   // Label text size in px; falls back to the bar caption size when unset
   readonly property int textSize: intSetting("fontSize", Style.font.caption, minSize, maxSize)
-  // Interface names to ignore (loopback and virtual bridges/veth pairs)
-  readonly property var excludeRe: /^lo$|^docker\d*|^br-.+|^virbr\d*|^veth.*|^vboxnet\d*/i
+  // Optional exact-name allowlist of interfaces to monitor. Empty (the
+  // default) means "every non-virtual interface"; see Model.VIRTUAL_IFACE_RE
+  // for what counts as virtual.
+  readonly property var ifaceAllow: Model.ifaceAllowList(setting("interfaces"))
 
   property real lastRx: -1
   property real lastTx: -1
@@ -65,72 +67,15 @@ BarWidget {
     ? "\u2193 " + cachedDownSpeedStr + "  \u2191 " + cachedUpSpeedStr
     : ""
 
-  function formatSpeed(bytesPerSec) {
-    if (bytesPerSec < 0) return "--"
-    var units = ["B/s", "KiB/s", "MiB/s", "GiB/s", "TiB/s"]
-    var v = bytesPerSec
-    var u = 0
-    while (v >= 1024 && u < units.length - 1) {
-      v /= 1024
-      u++
-    }
-    return (u === 0 ? Math.round(v) + " " : v.toFixed(1)) + units[u]
-  }
-
-  function formatTotal(bytes) {
-    if (bytes < 0) return "--"
-    var units = ["B", "KiB", "MiB", "GiB", "TiB"]
-    var v = bytes
-    var u = 0
-    while (v >= 1024 && u < units.length - 1) {
-      v /= 1024
-      u++
-    }
-    return (u === 0 ? Math.round(v) + " " : v.toFixed(1)) + units[u]
-  }
-
-  readonly property int maxInterfaces: 32
-  readonly property int maxFieldLen: 20
-
-  // Interface names are kernel-controlled input: strip rich-text and
-  // control characters before any value reaches the shell tooltip
-  function sanitizeLabel(value) {
-    return String(value).replace(/[<>]/g, "").replace(/[\u0000-\u001F\u007F]/g, " ")
-  }
-
-  function parseSample(text) {
-    var lines = text.split("\n")
-    var rx = 0
-    var tx = 0
-    var ifaces = []
-    var ifaceCount = 0
-    for (var i = 0; i < lines.length && ifaceCount < maxInterfaces; i++) {
-      var line = lines[i]
-      var idx = line.indexOf(":")
-      if (idx < 0) continue
-      var name = line.substring(0, idx).trim()
-      if (!name || excludeRe.test(name)) continue
-      var parts = line.substring(idx + 1).trim().split(/\s+/)
-      if (parts.length < 9) continue
-      var rxRaw = parts[0].length > maxFieldLen ? parts[0].substring(0, maxFieldLen) : parts[0]
-      var txRaw = parts[8].length > maxFieldLen ? parts[8].substring(0, maxFieldLen) : parts[8]
-      var ifaceRx = parseInt(rxRaw, 10) || 0
-      var ifaceTx = parseInt(txRaw, 10) || 0
-      rx += ifaceRx
-      tx += ifaceTx
-      var safeName = sanitizeLabel(name)
-      if (safeName) ifaces.push({ name: safeName, rx: ifaceRx, tx: ifaceTx })
-      ifaceCount++
-    }
-    return ifaceCount > 0 ? { rx: rx, tx: tx, ifaces: ifaces } : null
-  }
+  // Formatting and /proc/net/dev parsing live in Model.js so this widget and
+  // the dropdown can never drift apart on units or on which interfaces count.
 
   function applySample(sample) {
     if (!sample) return
     totalRx = sample.rx
     totalTx = sample.tx
-    cachedTotalRxStr = formatTotal(totalRx)
-    cachedTotalTxStr = formatTotal(totalTx)
+    cachedTotalRxStr = Model.fmtBytes(totalRx)
+    cachedTotalTxStr = Model.fmtBytes(totalTx)
     var now = Date.now()
     if (lastRx >= 0 && lastStamp > 0) {
       var secs = Math.max((now - lastStamp) / 1000.0, 0.001)
@@ -145,8 +90,8 @@ BarWidget {
         smoothDown = 0.3 * downSpeed + 0.7 * smoothDown
         smoothUp = 0.3 * upSpeed + 0.7 * smoothUp
       }
-      cachedDownSpeedStr = formatSpeed(smoothDown)
-      cachedUpSpeedStr = formatSpeed(smoothUp)
+      cachedDownSpeedStr = Model.fmtSpeed(smoothDown)
+      cachedUpSpeedStr = Model.fmtSpeed(smoothUp)
 
       // Continuous usage: session totals + the history chart use the raw
       // aggregate delta between samples, not the smoothed label value.
@@ -179,8 +124,13 @@ BarWidget {
   }
 
   function refresh() {
-    sampleProc.running = true
-    if (panelLoader.item && panelLoader.item.refresh) panelLoader.item.refresh()
+    // Quickshell ignores `running = true` on a live process, so assigning it
+    // unconditionally would silently drop a refresh requested mid-sample
+    // (middle-click, or the refresh IPC function).
+    if (!sampleProc.running) sampleProc.running = true
+    // Only hand the refresh to the panel when it is open -- the panel polls
+    // ss/nmcli on demand and must stay idle otherwise.
+    if (opened && panelLoader.item && panelLoader.item.refresh) panelLoader.item.refresh()
   }
 
   // ---- Details dropdown. Shape contract for shell.summon/hide/toggle
@@ -232,8 +182,18 @@ BarWidget {
     if (!isFinite(v)) return
     v = Math.max(minSize, Math.min(maxSize, v))
     if (v === textSize) return
+    // updateEntryInline *replaces* the shell.json layout entry with the
+    // object it is handed, so send the whole entry back: a bare
+    // { fontSize: v } would delete every other key on it (interval,
+    // interfaces, ...) the first time anyone scrolled the widget.
+    var entry = { id: root.moduleName }
+    for (var key in root.settings) if (key !== "id") entry[key] = root.settings[key]
+    entry.fontSize = v
+    // Apply locally first so the label resizes on this event rather than
+    // waiting for the write to come back through the bar.
+    root.settings = entry
     if (root.bar && root.bar.shell) {
-      root.bar.shell.updateEntryInline(root.moduleName, { fontSize: v })
+      root.bar.shell.updateEntryInline(root.moduleName, entry)
     }
   }
 
@@ -277,10 +237,14 @@ BarWidget {
 
   Process {
     id: sampleProc
-    command: ["sh", "-c", "head -n 34 /proc/net/dev | head -c 4096"]
+    // Read the file directly. The previous `sh -c "head -n 34 ... | head -c 4096"`
+    // wrapper silently dropped interfaces past the 32nd and could cut a
+    // counter in half, corrupting the total for a sample; the budget now
+    // lives in Model.parseDev, which skips any line it cannot read whole.
+    command: ["cat", "/proc/net/dev"]
     stdout: StdioCollector {
       waitForEnd: true
-      onStreamFinished: root.applySample(root.parseSample(text))
+      onStreamFinished: root.applySample(Model.parseDev(text, root.ifaceAllow))
     }
   }
 
@@ -311,7 +275,7 @@ BarWidget {
       for (var i = 0; i < ifaces.length; i++) {
         var f = ifaces[i]
         if (f.down > 0 || f.up > 0)
-          tip += "\n  " + f.name + ": \u2193 " + root.formatSpeed(f.down) + "  \u2191 " + root.formatSpeed(f.up)
+          tip += "\n  " + f.name + ": \u2193 " + Model.fmtSpeed(f.down) + "  \u2191 " + Model.fmtSpeed(f.up)
       }
       tip += "\nLeft: details \u2022 Scroll: fine-tune \u2022 Middle: refresh \u2022 Right: network"
       return tip

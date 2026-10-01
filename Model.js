@@ -4,32 +4,89 @@
 
 .pragma library
 
-function excludeRx() {
-  return /^lo$|^docker\d*|^br-.+|^virbr\d*|^veth.*|^vboxnet\d*/i
+// ---------------------------------------------------------------- interfaces
+
+// Never real WAN traffic: loopback, container bridges/veth pairs, and VPN or
+// tunnel overlays. The tunnel entries matter most -- a WireGuard/Tailscale
+// interface re-counts every byte that already crossed the physical NIC, so
+// including one double-reports throughput and inflates the totals for the
+// lifetime of the session.
+var VIRTUAL_IFACE_RE = /^lo\d*$|^docker\d*|^br-|^virbr\d*|^veth|^vboxnet\d*|^vmnet\d*|^vnic|^zt|^ham\d|^wg\d|^tailscale\d|^tun\d|^tap\d|^sit\d|^gre\d|^ip6tnl\d|^ip6gre\d|^cni\d|^podman\d|^flannel|^lxcbr|^kube|^nomad|^dummy\d|^ifb\d|^teql\d|^bond_slave/i
+
+// Kernel interface names are capped at IFNAMSIZ (16 bytes incl. NUL) and
+// dev_valid_name() rejects whitespace and control characters, so these budgets
+// are about bounding work per sample, not about taming hostile input.
+var MAX_SCAN_LINES = 512
+var MAX_IFACES = 64
+var MAX_FIELD_LEN = 20
+
+// Interface names reach the shell tooltip: strip rich-text markup and
+// control characters.
+function sanitizeIface(value) {
+  return String(value).replace(/[<>]/g, "").replace(/[\u0000-\u001F\u007F]/g, " ")
 }
 
-// ------------------------------------------------------------------ dev
+// Resolve the `interfaces` setting into an exact-name allowlist. Accepts an
+// array or a comma/whitespace separated string; empty means "every
+// non-virtual interface". An explicitly named interface is always honoured,
+// including a virtual one -- listing tailscale0 or docker0 is how you ask to
+// watch exactly that and nothing else.
+function ifaceAllowList(value) {
+  if (value === undefined || value === null) return []
+  var raw = Array.isArray(value) ? value : String(value).split(/[\s,]+/)
+  var names = []
+  for (var i = 0; i < raw.length; i++) {
+    var n = sanitizeIface(String(raw[i]).trim())
+    if (n && n.length <= 16 && names.indexOf(n) === -1) names.push(n)
+  }
+  return names
+}
 
-function parseDev(text) {
+// Parse /proc/net/dev into aggregate counters plus a per-interface breakdown.
+// Returns null when the read yielded no usable interface, so a failed or
+// garbled read keeps the previous sample instead of reporting zeroes.
+function parseDev(text, allow) {
+  var allowList = allow || []
+  var explicit = allowList.length > 0
   var lines = String(text).split("\n")
-  var ifaces = []
+  // A read that did not end in a newline was cut off mid-line (an upstream
+  // output cap, a short read). Drop the fragment rather than read a partial
+  // counter as if it were whole.
+  if (lines.length > 1 && lines[lines.length - 1] !== "") lines.pop()
   var rx = 0
   var tx = 0
+  var ifaces = []
+  var counted = 0
+  var scanned = 0
   for (var i = 0; i < lines.length; i++) {
+    if (scanned >= MAX_SCAN_LINES || counted >= MAX_IFACES) break
     var line = lines[i]
     var idx = line.indexOf(":")
     if (idx < 0) continue
+    scanned++
     var name = line.substring(0, idx).trim()
-    if (!name || excludeRx().test(name)) continue
+    if (!name) continue
+    if (explicit ? allowList.indexOf(name) === -1 : VIRTUAL_IFACE_RE.test(name)) continue
     var parts = line.substring(idx + 1).trim().split(/\s+/)
-    if (parts.length < 9) continue
-    var ifRx = parseInt(parts[0], 10) || 0
-    var ifTx = parseInt(parts[8], 10) || 0
+    // The kernel writes exactly 16 counter columns per interface, so anything
+    // short of that is a line we did not receive in full.
+    if (parts.length < 16) continue
+    // A counter wider than any real byte count means a garbled read. Skip the
+    // interface rather than accept a nonsensical value. Never "fix" this by
+    // trimming the field: a shortened number is a different number, whereas
+    // counting above 2^53 only costs sub-byte precision on the delta, which
+    // is irrelevant at display resolution.
+    if (parts[0].length > MAX_FIELD_LEN || parts[8].length > MAX_FIELD_LEN) continue
+    var ifRx = parseInt(parts[0], 10)
+    var ifTx = parseInt(parts[8], 10)
+    if (!isFinite(ifRx) || !isFinite(ifTx)) continue
     rx += ifRx
     tx += ifTx
-    ifaces.push({ name: name, rx: ifRx, tx: ifTx })
+    counted++
+    var safeName = sanitizeIface(name)
+    if (safeName) ifaces.push({ name: safeName, rx: ifRx, tx: ifTx })
   }
-  return { rx: rx, tx: tx, ifaces: ifaces }
+  return counted > 0 ? { rx: rx, tx: tx, ifaces: ifaces } : null
 }
 
 function rates(prev, cur, secs) {
@@ -168,7 +225,11 @@ function parseNmcli(text) {
 
 // ------------------------------------------------------------------- ss
 
-var SS_LINE_RE = /^(\S+)\s+(\d+)\s+(\d+)\s+(\S+)\s+(\S+)/
+// Anchored on the process group rather than on fixed column offsets: `ss`
+// omits the leading State column when a `state` filter is in effect (e.g.
+// `ss -tinp state established`), so the Recv-Q/Send-Q/Local/Peer columns shift
+// left by one. Everything before the process group ends with Local then Peer,
+// which holds for both layouts.
 var SS_PROC_RE = /users:\(\(\"([^"]*)",\s*pid=(\d+),\s*fd=(\d+)\)\)/
 var SS_INFO_RE = /bytes_sent:(\d+).*?bytes_received:(\d+)/i
 
@@ -179,15 +240,16 @@ function parseSS(text, prev) {
   var apps = {}
   var next = {}
   for (var i = 0; i < lines.length; i++) {
-    var m = SS_LINE_RE.exec(lines[i])
-    if (!m) continue
-    var p = SS_PROC_RE.exec(lines[i])
-    if (!p) continue  // no process attribution (foreign/root sockets)
-    var proc = p[1]
-    var pid = p[2]
-    var local = m[4]
-    var remote = m[5]
-    var fd = p[3]
+    var pm = SS_PROC_RE.exec(lines[i])
+    if (!pm) continue  // no process attribution (foreign/root sockets, headers)
+    var cols = lines[i].substring(0, pm.index).trim().split(/\s+/)
+    // Need at least Recv-Q, Send-Q, Local and Peer ahead of the process group.
+    if (cols.length < 4) continue
+    var proc = pm[1]
+    var pid = pm[2]
+    var local = cols[cols.length - 2]
+    var remote = cols[cols.length - 1]
+    var fd = pm[3]
     var sent = 0
     var recv = 0
     if (i + 1 < lines.length) {
@@ -198,12 +260,12 @@ function parseSS(text, prev) {
       }
     }
     var key = pid + "|" + local + "|" + remote + "|" + fd
-    var p = prev ? prev[key] : null
+    var baseline = prev ? prev[key] : null
     var dSent = 0
     var dRecv = 0
-    if (p && typeof p.sent === "number" && sent >= p.sent && recv >= p.recv) {
-      dSent = sent - p.sent
-      dRecv = recv - p.recv
+    if (baseline && sent >= baseline.sent && recv >= baseline.recv) {
+      dSent = sent - baseline.sent
+      dRecv = recv - baseline.recv
     }
     next[key] = { sent: sent, recv: recv }
     var app = apps[pid] || (apps[pid] = { pid: pid, name: proc, deltaDown: 0, deltaUp: 0, conns: 0 })

@@ -13,7 +13,7 @@ import "Model.js" as Model
 // meaningful the moment the panel opens:
 //
 //   - /proc/net/dev every interval        -> history chart + iface rates
-//   - `ss -tinp` every 3s                 -> per-app bytes (deltas between polls)
+//   - `ss -tinp state established` / 1.5s -> per-app bytes (deltas between polls)
 //   - default route + nmcli every 5s      -> connection details
 //
 // The bar widget (hostWidget) keeps feeding the little label; the panel only
@@ -104,6 +104,9 @@ Panel {
     else root.open()
   }
 
+  // Explicit refresh (hero button, R key, IPC, and the prime call in open()).
+  // Deliberately not gated on `opened`: open() primes before showing, and the
+  // rest only arrive while the popup is up.
   function refresh() {
     refreshSS()
     pollInfo()
@@ -114,9 +117,12 @@ Panel {
 
   function runNmcli() {
     if (root.iface === "") return
+    // Never rewrite `command` on a live process. A run already in flight is
+    // either for this interface or will be superseded by the next poll.
+    if (nmcliProc.running) return
     nmcliProc.command = ["nmcli", "-t", "-e", "no",
       "-f", "GENERAL,IP4,DHCP4,IP6,AP", "device", "show", root.iface]
-    if (!nmcliProc.running) nmcliProc.running = true
+    nmcliProc.running = true
   }
 
   // ---- data handlers ----------------------------------------------------
@@ -129,40 +135,40 @@ Panel {
     var res = Model.parseSS(text, root.prevConn)
     root.prevConn = res.next
 
-    var keep = {}
+    // One pass to fold this poll into the retained session totals, keeping the
+    // live rate/count alongside; a second pass emits the rows. Doing it this
+    // way means no per-row lookup table and no O(n^2) pid matching.
+    var live = {}
     for (var i = 0; i < res.apps.length; i++) {
       var a = res.apps[i]
-      keep[a.pid] = true
-      var c = root.appCum[a.pid]
-      if (!c) c = root.appCum[a.pid] = { name: a.name, down: 0, up: 0 }
+      var pid = String(a.pid)
+      var c = root.appCum[pid]
+      if (!c) c = root.appCum[pid] = { name: a.name, down: 0, up: 0, lastPoll: now }
       c.name = a.name
       c.down += a.deltaDown
       c.up += a.deltaUp
       c.lastPoll = now
+      live[pid] = {
+        conns: a.conns,
+        rateDown: a.deltaDown / dt * 1000,
+        rateUp: a.deltaUp / dt * 1000
+      }
     }
     // Drop apps that have had no attributable connections for 30s.
     for (var p in root.appCum) {
-      if (!keep[p] && now - root.appCum[p].lastPoll > 30000) delete root.appCum[p]
+      if (!live[p] && now - root.appCum[p].lastPoll > 30000) delete root.appCum[p]
     }
 
     var rows = []
     for (var k in root.appCum) {
       var c2 = root.appCum[k]
+      // A retained app that is no longer live keeps its session totals but
+      // shows no live rate and no connections.
+      var l = live[k] || { conns: 0, rateDown: 0, rateUp: 0 }
       rows.push({
         pid: k, name: c2.name || "?", down: c2.down, up: c2.up,
-        conns: 0, rateDown: 0, rateUp: 0
+        conns: l.conns, rateDown: l.rateDown, rateUp: l.rateUp
       })
-    }
-    for (var j = 0; j < res.apps.length; j++) {
-      var a2 = res.apps[j]
-      for (var q = 0; q < rows.length; q++) {
-        if (rows[q].pid === a2.pid) {
-          rows[q].conns = a2.conns
-          rows[q].rateDown = a2.deltaDown / dt * 1000
-          rows[q].rateUp = a2.deltaUp / dt * 1000
-          break
-        }
-      }
     }
     rows.sort(function(x, y) { return (y.down + y.up) - (x.down + x.up) })
     root.appRows = rows
@@ -177,8 +183,9 @@ Panel {
 
   function runIw() {
     if (root.iface === "") return
+    if (iwProc.running) return
     iwProc.command = ["iw", "dev", root.iface, "link"]
-    if (!iwProc.running) iwProc.running = true
+    iwProc.running = true
   }
 
   function onIW(text) {
@@ -211,13 +218,18 @@ Panel {
 
   // ------------------------------------------------------------ lifecycle
 
-  Component.onCompleted: {
-    refresh()
-  }
+  // No polling until the popup is actually opened: `open()` primes the
+  // first poll, and the timers below take over from there. This matters
+  // because the panel is instantiated with the bar widget, not lazily on
+  // open, so anything started here would run for the whole shell session.
 
   Process {
     id: ssProc
-    command: ["ss", "-tinp"]
+    // Restricted to established sockets: a socket only moves bytes while it
+    // is established, and the unfiltered listing emits a full info line per
+    // socket in every state, which is the most expensive thing this plugin
+    // runs.
+    command: ["ss", "-tinp", "state", "established"]
     stdout: StdioCollector {
       waitForEnd: true
       onStreamFinished: root.onSS(text)

@@ -14,6 +14,7 @@ A real-time network speed widget for the Omarchy bar. Shows live download and up
 - **Configurable Interval** — Adjust sampling rate via settings (default: 2000ms)
 - **Resizable Font** — Scroll to fine-tune the widget font size
 - **Total Counters** — Hover for cumulative RX/TX totals and per-interface breakdown
+- **Tunnel-aware** — VPN and container interfaces are excluded by default so a WireGuard/Tailscale session is not counted twice; pin the exact set with `interfaces`
 - **Theme-Aware Dropdown** — One click opens a fully Omarchy-styled panel coloured entirely from your active theme (no hardcoded colours):
   - **Hero** — Connection name, live state (e.g. CONNECTED), and refresh/close buttons
   - **Live Throughput Chart** — Stacked down/up traffic with a **5 / 15 / 30-minute window selector**
@@ -51,13 +52,15 @@ Edit the widget entry in your `~/.config/omarchy/shell.json`:
 ```json
 {
   "bar": {
-    "right": [
-      {
-        "id": "davedes.netspeed",
-        "interval": 2000,
-        "fontSize": 12
-      }
-    ]
+    "layout": {
+      "right": [
+        {
+          "id": "davedes.netspeed",
+          "interval": 2000,
+          "fontSize": 12
+        }
+      ]
+    }
   }
 }
 ```
@@ -65,11 +68,13 @@ Edit the widget entry in your `~/.config/omarchy/shell.json`:
 **Settings:**
 - `interval` (ms) — Sample rate (bar + chart). Lower = more accurate but higher CPU (default: 2000). Clamped to 250–60000 ms; non-numeric or zero/negative values fall back to the default
 - `fontSize` (px) — Widget text size (default: bar caption size). Clamped to 8–28 px
+- `interfaces` — Optional list of interfaces to monitor, e.g. `"enp5s0"` or `["wlan0", "enp5s0"]`. Defaults to every non-virtual interface (see [Excluded Interfaces](#excluded-interfaces)). Listing a virtual interface explicitly is allowed and opts you into counting it
 
 ### Per-App Usage notes
 
 - Speeds and session totals come from live TCP sockets sampled via `ss` (default every 1.5s)
 - Totals accumulate for the current session and reset when the shell/widget restarts
+- Only established sockets are sampled. A socket only moves bytes once it is established, so nothing is lost, and the connection count reflects live connections instead of every `SYN-SENT`/`TIME-WAIT` transient
 - Only TCP sockets are attributed; QUIC/UDP traffic (e.g. YouTube or Google over HTTP/3) is not visible per-app, so apps doing heavy QUIC can look quiet while the bar still shows the real throughput
 
 ### IPC Commands
@@ -94,22 +99,29 @@ omarchy shell send davedes.netspeed toggle
 ## How It Works
 
 1. **Reads** `/proc/net/dev` every `interval` milliseconds
-2. **Filters** loopback, Docker, and virtual interfaces (see [Excluded Interfaces](#excluded-interfaces))
+2. **Filters** loopback, container, and VPN/tunnel interfaces (see [Excluded Interfaces](#excluded-interfaces))
 3. **Calculates** deltas from the previous sample
 4. **Smooths** speed values with an exponential moving average
 5. **Formats** as human-readable speeds (B/s, KiB/s, MiB/s, etc.)
-6. **Dropdown** — connection details come from `nmcli`/`ip`/`iw`, per-app usage from `ss -tinp`
+6. **Dropdown** — connection details come from `nmcli`/`ip`/`iw`, per-app usage from `ss -tinp state established`
 
 ### Excluded Interfaces
 
-The following interface patterns are excluded from monitoring (case-insensitive):
+The following interface patterns are excluded by default (case-insensitive):
 
-- `lo` — Loopback
+- `lo*` — Loopback
 - `docker*` — Docker bridges
 - `br-*` — Linux bridges
 - `virbr*` — libvirt bridges
 - `veth*` — Virtual Ethernet pairs
-- `vboxnet*` — VirtualBox host-only networks
+- `vboxnet*`, `vmnet*`, `vnic*` — VirtualBox/VMware host-only networks
+- `wg*`, `tailscale*`, `tun*`, `tap*`, `sit*`, `gre*`, `ip6tnl*`, `ip6gre*`, `ham*`, `zt*` — VPN and tunnel overlays
+- `cni*`, `podman*`, `flannel*`, `lxcbr*`, `kube*`, `nomad*` — Container and cluster networks
+- `dummy*`, `ifb*`, `teql*`, `bond_slave*` — Traffic shaping and bond slaves
+
+Tunnel interfaces matter most here: a VPN re-counts every byte that already crossed the physical NIC, so including one double-reports throughput and inflates the totals. If you do want to watch one, name it explicitly in `interfaces`.
+
+The default covers the common virtual interfaces, but it is a fixed list rather than a rule. Check what is actually on your machine with `ip -br link` and pin anything you need (or need to skip) via `interfaces`.
 
 ## Troubleshooting
 
@@ -123,6 +135,16 @@ The following interface patterns are excluded from monitoring (case-insensitive)
 
 **High CPU usage?**
 - Increase `interval` in shell.json (e.g., 2000ms for less frequent sampling)
+- The dropdown's per-app table is the most expensive part while it is open — it samples `ss` every 1.5s. Close it when you are not looking at it (nothing runs while it is closed)
+
+**Numbers higher than my real traffic?**
+- A VPN/tunnel interface is double-counting your physical NIC. Check `ip -br link` for `wg*`/`tailscale*`/`tun*`, and pin `interfaces` to just the interface you care about
+
+**One of my interfaces is missing from the tooltip?**
+- If its name matches an excluded pattern above, list it explicitly in `interfaces`
+
+**Total jumped to a nonsense value?**
+- Please report it — the parser should now discard an incomplete `/proc/net/dev` read rather than act on a partial counter
 
 ## License
 
