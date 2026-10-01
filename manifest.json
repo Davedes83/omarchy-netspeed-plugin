@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "id": "davedes.netspeed",
   "name": "Net Speed",
-  "version": "2.1.0",
+  "version": "2.2.0",
   "author": "davedes",
   "description": "Live network download and upload speeds in the bar with a details dropdown (traffic chart, connection info, per-interface and per-app usage). Tunnel-aware: VPN and container interfaces are excluded by default so traffic is not counted twice.",
   "kinds": ["bar-widget"],

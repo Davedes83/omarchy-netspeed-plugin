@@ -2,6 +2,28 @@
 
 All notable changes to this project will be documented in this file.
 
+## [2.2.0] - 2026-10-01
+
+### Changed
+- **The dropdown is now built from the shell's own UI kit** — `PanelHero`, `PanelSectionHeader`, `PanelSeparator`, `PanelActionButton`, `CursorSurface` and `BorderSurface` instead of hand-rolled equivalents, so the popup tracks the active theme's colours, border specs, corner radius and control states exactly like the first-party panels
+- **Hero** — `PanelHero` with the link's live rate promoted into its detail pill (e.g. `866.7 Mbit/s`), and refresh/close moved onto its `trailingControl` edge
+- **Spacing** — raw `Style.space(N)` calls replaced with `Style.spacing.*` tokens, so a theme's `[spacing]` density settings now apply to this panel
+- **Chart** — gradient-filled areas instead of flat polygons, round-capped strokes, a live head marker on each series, a dashed guide at the top of scale, and a "Collecting samples…" state before enough history exists
+- **Per-app rows** — two-line `CursorSurface` rows (identity + connection count, then live rate + session totals) with the shell's shared hover-cursor fill and border; row height now accounts for both lines
+
+### Added
+- **Scrollbar** — the dropdown scrolls with a visible `ScrollBar`, with a reserved gutter so it can never clip the right-aligned values
+- **Link-state tone** — a link that is present but not up dims the hero glyph and switches STATUS to the theme's urgent colour
+- **`nmcli` AP rate as a LINK RATE fallback** — for drivers where `iw` prints nothing
+- **IPv4/IPv6-aware status** — STATUS uses the cleaned state word (`CONNECTED`) instead of nmcli's raw `100 (connected)`
+
+### Fixed
+- **Chart-window pills** were plain rectangles with a hardcoded hover tint; they are now real pills using `Border.controlSpec` and the shared hover fill
+- **Row/table separators** were hardcoded at 5–6% opacity, well below the shell's hairline weight; they now use `PanelSeparator`
+- **"sampled every 2s"** misreported the 1.5s poll interval; it now shows `1.5s`
+- **BAND row** could render empty where every other row falls back to `--`
+- **Per-app name/pid placement** — the pid was pushed to the far right by an over-wide name field; the name now shrinks to fit so the pair reads together
+
 ## [2.1.0] - 2026-10-01
 
 ### Added
