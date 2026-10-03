@@ -33,6 +33,44 @@ Or manually:
 git clone https://github.com/Davedes83/omarchy-netspeed-plugin ~/.config/omarchy/plugins/davedes.netspeed
 ```
 
+## Removal
+
+The plugin removes itself cleanly — it ships no system services, no hooks, and no background daemons, and it never edits files outside its own plugin directory.
+
+```bash
+omarchy plugin remove davedes.netspeed
+omarchy restart shell
+```
+
+If you added the widget to `~/.config/omarchy/shell.json` yourself, delete its `davedes.netspeed` entry too:
+
+```json
+{
+  "bar": {
+    "layout": {
+      "right": [
+        "clock"
+      ]
+    }
+  }
+}
+```
+
+Nothing else is left behind; `~/.config/omarchy/plugins/davedes.netspeed` is the only path the plugin writes to.
+
+## Dependencies
+
+No additional packages are required. The widget reads `/proc/net/dev` directly and uses four commands that ship with a standard Omarchy install:
+
+| Command | Package | Used for |
+| --- | --- | --- |
+| `ip` | `iproute2` | interface address, MTU, and gateway lookups |
+| `ss` | `iproute2` | per-app TCP traffic attribution |
+| `nmcli` | `networkmanager` | Wi-Fi SSID, signal, DHCP lease, metered flag |
+| `iw` | `iw` | wireless link rate and band (Wi-Fi only) |
+
+If a command is unavailable, the widget degrades gracefully and simply omits that section. Only the download/upload figures in the bar require no external command at all.
+
 ## Usage
 
 The widget appears in the right section of your bar by default. No configuration needed—it works out of the box.
