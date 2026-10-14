@@ -31,6 +31,14 @@ BarWidget {
   // default) means "every non-virtual interface"; see Model.VIRTUAL_IFACE_RE
   // for what counts as virtual.
   readonly property var ifaceAllow: Model.ifaceAllowList(setting("interfaces"))
+  // Short unit form in the bar ("768K" instead of "768.0 KiB/s"). Opt-in: the
+  // default is the full form, so nothing changes for anyone who has never
+  // asked. shell.json gives booleans as real JSON, but a hand-edited config
+  // can carry the string "true", and only an exact true/1 means on -- same
+  // "absent means default" rule the other settings follow.
+  readonly property bool compactSpeed: setting("compactSpeed") === true
+                                       || setting("compactSpeed") === 1
+                                       || setting("compactSpeed") === "true"
 
   property real lastRx: -1
   property real lastTx: -1
@@ -90,8 +98,8 @@ BarWidget {
         smoothDown = 0.3 * downSpeed + 0.7 * smoothDown
         smoothUp = 0.3 * upSpeed + 0.7 * smoothUp
       }
-      cachedDownSpeedStr = Model.fmtSpeed(smoothDown)
-      cachedUpSpeedStr = Model.fmtSpeed(smoothUp)
+      cachedDownSpeedStr = Model.fmtSpeed(smoothDown, root.compactSpeed)
+      cachedUpSpeedStr = Model.fmtSpeed(smoothUp, root.compactSpeed)
 
       // Continuous usage: session totals + the history chart use the raw
       // aggregate delta between samples, not the smoothed label value.
@@ -268,7 +276,12 @@ BarWidget {
     fontSize: root.textSize
     tooltipText: {
       if (!root.ready) return ""
-      var tip = "\u2193 " + root.cachedDownSpeedStr + "   \u2191 " + root.cachedUpSpeedStr
+      // The headline re-formats from the raw smoothed values rather than reusing
+      // the cached label strings, because those follow `compactSpeed`. The bar
+      // may be showing "768K"; the tooltip is where the exact figure stays
+      // available, so it always spells the unit out. It also carries the
+      // per-interface lines, which were already full-form for the same reason.
+      var tip = "\u2193 " + Model.fmtSpeed(root.smoothDown) + "   \u2191 " + Model.fmtSpeed(root.smoothUp)
         + "\nTotal \u2193 " + root.cachedTotalRxStr + "  \u2191 " + root.cachedTotalTxStr
       // Per-interface breakdown
       var ifaces = root.ifaceSpeeds

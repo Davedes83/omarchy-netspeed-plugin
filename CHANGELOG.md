@@ -2,6 +2,18 @@
 
 All notable changes to this project will be documented in this file.
 
+## [Unreleased]
+
+### Added
+- **`compactSpeed` setting** — a short unit in the bar (`↓ 768K  ↑ 12K` instead of `↓ 768.0 KiB/s  ↑ 12.5 KiB/s`), opt-in and off by default so existing setups are untouched. It is fixed width like the full form, and the hover tooltip always spells the unit out, so the precision is still one hover away
+
+### Fixed
+- **The bar label jitters** — the speed string changed length between readings (`0 B/s` is 5 characters, `1024.0KiB/s` is 11), so every sample resized the label and moved whatever sits to its right. Every value is now padded into a fixed cell: 12 characters for the full form, 5 for compact. `fmtBytes` shares the same width so the totals in the tooltip line up with the speeds above them
+- **The unit-promotion rollover** — `fmtSpeed(1023.9)` rendered `1024 B/s`, a round number in bytes for a value that is just under 1 KiB/s, and `fmtSpeed(1048575)` rendered `1024.0KiB/s`, which is not a value that can exist in that unit. Promotion now happens before rounding can cross the boundary (at 1023.5 rather than 1024), so no unit short of the top one can ever display a number at or above 1024
+
+### Added (tests)
+- **`tests/model_test.js`** — Node-runnable unit tests for the formatters: fixed-width cells, the promotion rollover and the no-number-over-1024 invariant, `compactSpeed` on and off, and the negative / non-finite / zero inputs. No dependencies; run with `node tests/model_test.js`
+
 ## [2.2.0] - 2026-10-01
 
 ### Changed

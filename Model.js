@@ -281,22 +281,98 @@ function parseSS(text, prev) {
 
 // ------------------------------------------------------------- formatting
 
-function fmtSpeed(bytesPerSec) {
-  if (!isFinite(bytesPerSec) || bytesPerSec < 0) return "--"
-  var units = ["B/s", "KiB/s", "MiB/s", "GiB/s", "TiB/s"]
-  var v = bytesPerSec
+// Left/right pad to an exact character width. Not String.padStart/padEnd:
+// this file is deliberately ES5 and runs under QJSEngine/Quickshell, where
+// those are not reliably present.
+function padLeft(s, w) {
+  var out = String(s)
+  while (out.length < w) out = " " + out
+  return out
+}
+
+function padRight(s, w) {
+  var out = String(s)
+  while (out.length < w) out = out + " "
+  return out
+}
+
+// Rendered widths. The bar repaints the label on every sample, so a string that
+// changes LENGTH moves everything to its right; toFixed() guarantees a decimal
+// point but not a width, which is why the widget used to swing between 5 and 11
+// characters. Every value is padded into a fixed cell instead.
+//
+// The separating space is its own column and is NOT counted in the unit width:
+// unit width is 5 for both formatters, so fmtSpeed and fmtBytes produce the
+// same 12-character cell and the totals in the tooltip line up with the speeds
+// above them. That consistency is the point of sharing the two widths rather
+// than sizing each formatter to its own longest unit.
+var SPEED_UNIT_WIDTH = 5
+var SPEED_NUM_WIDTH = 6
+var BYTES_UNIT_WIDTH = 5
+var BYTES_NUM_WIDTH = 6
+// Compact form ("768K") drops the /s, spells the unit as one letter, and shows
+// a whole number of that unit: the request was "768K", not "768.4K", and a
+// figure this short is read at a glance rather than measured, so the decimal
+// is noise. The cell is 5 characters instead of 12. Rounding to whole units
+// costs at most half a unit, which is why the tooltip keeps the full form --
+// see BarWidget's tooltip, which re-formats from the raw values rather than
+// reusing the compact label string.
+var COMPACT_UNIT_WIDTH = 1
+var COMPACT_NUM_WIDTH = 4
+
+// Promote at 1023.5, not 1024. Promotion has to happen before ROUNDING can
+// push the rendered number across the unit boundary, and the two branches round
+// at different points: the integer B/s branch rounds at 1023.5 (Math.round),
+// the decimal branches at 1023.95 (toFixed(1)). Testing >= 1024 left both holes
+// open -- 1023.9 rendered as "1024 B/s", and 1048575 as the impossible
+// "1024.0KiB/s". One threshold at the earliest of the two covers both: nothing
+// below 1023.5 can round up to 1024 in either branch.
+//
+// Consequence, relied on by the tests: a value in a non-maximum unit always
+// renders below 1024. Only the top unit (TiB) is allowed to exceed it, because
+// there is nothing to promote into.
+var PROMOTE_AT = 1023.5
+
+// Shared scale/format core: divide down into the largest unit where the value
+// sits below the promotion threshold, and report the unit index. Callers decide
+// how to render the number in that unit.
+function scaleUnits(value, units, promoteAt) {
+  var v = value
   var u = 0
-  while (v >= 1024 && u < units.length - 1) { v /= 1024; u++ }
-  return (u === 0 ? Math.round(v) + " " : v.toFixed(1)) + units[u]
+  while (v >= promoteAt && u < units.length - 1) { v /= 1024; u++ }
+  return { v: v, u: u }
+}
+
+function fmtSpeed(bytesPerSec, compact) {
+  // "--" is returned unpadded, deliberately. It is the no-reading case: the
+  // bar hides its label entirely until the first sample (BarWidget's `visible:
+  // ready`), and a 12-character block of spaces and dashes in the tooltip would
+  // read as a broken column rather than as "nothing yet". Padding a value that
+  // exists, and leaving a value that does not alone, is the only combination
+  // that is never wrong.
+  if (!isFinite(bytesPerSec) || bytesPerSec < 0) return "--"
+  if (compact) {
+    var cUnits = ["B", "K", "M", "G", "T"]
+    var c = scaleUnits(bytesPerSec, cUnits, PROMOTE_AT)
+    // Always a whole number of the chosen unit: the point of the compact form
+    // is fewer characters, and a decimal point is one of them. Promotion still
+    // happens at PROMOTE_AT, so no unit can render a number >= 1024.
+    var cNum = String(Math.round(c.v))
+    return padLeft(cNum, COMPACT_NUM_WIDTH)
+      + padRight(cUnits[c.u], COMPACT_UNIT_WIDTH)
+  }
+  var units = ["B/s", "KiB/s", "MiB/s", "GiB/s", "TiB/s"]
+  var s = scaleUnits(bytesPerSec, units, PROMOTE_AT)
+  var num = s.u === 0 ? String(Math.round(s.v)) : s.v.toFixed(1)
+  return padLeft(num, SPEED_NUM_WIDTH) + " " + padRight(units[s.u], SPEED_UNIT_WIDTH)
 }
 
 function fmtBytes(bytes) {
   if (!isFinite(bytes) || bytes < 0) return "--"
   var units = ["B", "KiB", "MiB", "GiB", "TiB"]
-  var v = bytes
-  var u = 0
-  while (v >= 1024 && u < units.length - 1) { v /= 1024; u++ }
-  return (u === 0 ? Math.round(v) + " " : v.toFixed(1)) + units[u]
+  var b = scaleUnits(bytes, units, PROMOTE_AT)
+  var num = b.u === 0 ? String(Math.round(b.v)) : b.v.toFixed(1)
+  return padLeft(num, BYTES_NUM_WIDTH) + " " + padRight(units[b.u], BYTES_UNIT_WIDTH)
 }
 
 function fmtRemaining(secs) {
