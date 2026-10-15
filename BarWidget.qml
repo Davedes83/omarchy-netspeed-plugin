@@ -64,15 +64,32 @@ BarWidget {
   // Enough samples for the panel's longest (30 min) chart window at any interval.
   readonly property int historyMax: Math.ceil(30 * 60 * 1000 / sampleInterval) + 1
 
-  // Cached formatted speed strings to avoid recomputation
+  // Cached formatted speed strings to avoid recomputation. UNPADDED: the bar
+  // label builds its own cell from Model.fmtSpeedCell, and the dropdown hero
+  // wants a plain string rather than one carrying a figure field's worth of
+  // leading blanks. The totals are padded, because they belong to the tooltip's
+  // columns.
   property string cachedDownSpeedStr: "--"
   property string cachedUpSpeedStr: "--"
   property string cachedTotalRxStr: "--"
   property string cachedTotalTxStr: "--"
 
   readonly property bool ready: downSpeed >= 0
+
+  // Both halves of this label are an arrow labelling a rate, and the two have to
+  // read as one thing. Nothing goes between the arrow and its figure
+  // (Model.fmtSpeedCell).
+  //
+  // The cell is a fixed width, which is the part that has to hold: the label must
+  // not resize between samples or everything to its right in the bar moves. The
+  // slack that buys that goes between the figure and its own unit rather than
+  // after the unit, so the gap between the download half and the upload half is
+  // the separator below and nothing else -- the same on every sample, instead of
+  // swallowing five characters of bar on a short figure.
   readonly property string label: ready
-    ? "\u2193 " + cachedDownSpeedStr + "  \u2191 " + cachedUpSpeedStr
+    ? Model.fmtSpeedCell("\u2193", smoothDown, compactSpeed)
+      + "  "
+      + Model.fmtSpeedCell("\u2191", smoothUp, compactSpeed)
     : ""
 
   // Formatting and /proc/net/dev parsing live in Model.js so this widget and
@@ -98,8 +115,8 @@ BarWidget {
         smoothDown = 0.3 * downSpeed + 0.7 * smoothDown
         smoothUp = 0.3 * upSpeed + 0.7 * smoothUp
       }
-      cachedDownSpeedStr = Model.fmtSpeed(smoothDown, root.compactSpeed)
-      cachedUpSpeedStr = Model.fmtSpeed(smoothUp, root.compactSpeed)
+      cachedDownSpeedStr = Model.fmtSpeedBare(smoothDown, root.compactSpeed)
+      cachedUpSpeedStr = Model.fmtSpeedBare(smoothUp, root.compactSpeed)
 
       // Continuous usage: session totals + the history chart use the raw
       // aggregate delta between samples, not the smoothed label value.

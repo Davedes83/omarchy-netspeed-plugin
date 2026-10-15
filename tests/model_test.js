@@ -75,6 +75,112 @@ eq(ctx.fmtBytes(1073741824).length, 12, "fmtBytes(1GiB) fills the full cell");
 eq(ctx.fmtBytes(0).substring(7), "B    ", "fmtBytes pads its own unit to the same width");
 eq(ctx.fmtBytes(0).charAt(6), " ", "fmtBytes separates number and unit the same way");
 
+// --------------------------------------------------------- the bar's cell
+//
+// The bar label is two halves of "arrow, then a rate", and the arrow has to sit
+// against its own figure. Neither end of the figure can be padded in front of
+// it: a leading pad strands the arrow across blank space, worse the shorter the
+// figure gets. So fmtSpeedCell pads the figure on its RIGHT, inside the cell.
+//
+// Why the right and not after the unit (both give the same cell width): padding
+// the cell puts the slack at the end, so the gap between the two stats is that
+// slack plus the separator between them -- five characters of blank on a short
+// figure. Padding the figure keeps the slack inside the stat, so the gap
+// between the two stats is the separator alone, on every sample.
+//
+// What must NOT change: the cell width. That is the whole jitter guarantee, and
+// the bar label is what the padding exists for, so it has to hold here.
+
+function barCell(arrow, bytesPerSec, compact) {
+  return ctx.fmtSpeedCell(arrow, bytesPerSec, compact);
+}
+
+eq(ctx.barCellWidth(false), 13, "the full-form bar cell is arrow + figure + separator + unit");
+eq(ctx.barCellWidth(true), 6, "the compact bar cell drops the separator and the /s");
+eq(barCell("\u2193", 0).length, ctx.barCellWidth(false), "the full-form cell is its declared width");
+eq(barCell("\u2193", 0, true).length, ctx.barCellWidth(true), "the compact cell is its declared width");
+
+// The arrow is against the figure: the figure starts in the very next cell.
+eq(barCell("\u2193", 0).charAt(1) === " ", false, "the cell puts nothing between arrow and figure");
+eq(barCell("\u2193", 0).substring(1, 2), "0", "a 1-digit figure starts right after the arrow");
+eq(barCell("\u2193", 1023.4).substring(1, 5), "1023", "a 4-digit figure starts right after the arrow");
+eq(barCell("\u2193", 1048000).substring(1, 7), "1023.4", "a figure needing the whole field still starts at the front");
+
+// The slack is INSIDE the cell, behind the figure -- so the unit is the last
+// thing in the cell and nothing follows it.
+eq(barCell("\u2193", 1023.4).trim().slice(-4), " B/s", "the unit ends the cell");
+eq(barCell("\u2193", 0).substring(0, 5), "\u21930   ", "a short figure pads behind itself, not in front");
+eq(barCell("\u2193", 0).trim().charAt(0) === " ", false, "the cell never opens with padding");
+// Slack goes behind the figure: a 4-digit figure in a 6-wide field leaves two
+// blank characters, plus the separator. The OLD layout put those in front of
+// the figure instead, which is what put the arrow three characters from its
+// number.
+eq(barCell("\u2193", 1023.4).substring(5, 8), "   ",
+   "a 4-digit figure leaves its slack behind it, not in front");
+
+// The guarantee the whole thing exists for. A wide spread of figures, including
+// every digit-count change the label can hit, must all produce the same cell
+// width or the widget resizes and drags the rest of the bar with it.
+var widths = [];
+for (var v = 0; v <= 2000; v += 0.4) {
+  widths.push(barCell("\u2193", v).length);
+  widths.push(barCell("\u2193", v, true).length);
+}
+widths.push(barCell("\u2193", 1048576).length);
+widths.push(barCell("\u2193", 1024 * 1024 * 1024).length);
+var bad = widths.filter(function (w) { return w !== 13 && w !== 6; });
+eq(bad.length, 0, "every bar cell is its declared width, for every figure (offenders: "
+   + bad.slice(0, 5).join(",") + ")");
+
+// Neither arrow moves, and the gap between the two stats is the separator and
+// nothing else -- the complaint that started this: the slack used to land in
+// that gap and swallow bar width.
+function statLabel(down, up) {
+  return barCell("\u2193", down) + "  " + barCell("\u2191", up);
+}
+var labelLens = [];
+var upCols = [];
+var statGaps = [];
+[0, 0.4, 9.9, 99.9, 100, 999.9, 1023.4, 1048000, 1048575, 1048576].forEach(function (v) {
+  var l = statLabel(v, v);
+  labelLens.push(l.length);
+  upCols.push(l.indexOf("\u2191"));
+  // Ink gap: where the upload cell's figure begins, minus where the download
+  // cell's unit ends. Fixed by construction, but asserted because it is the
+  // thing a regression would show up in.
+  statGaps.push(l.indexOf("\u2191") - (l.indexOf("\u2193") + ctx.barCellWidth(false)));
+});
+eq(labelLens.every(function (l) { return l === labelLens[0]; }), true,
+   "the assembled two-stat label is the same length for every pair of figures");
+eq(upCols.every(function (c) { return c === upCols[0]; }), true,
+   "the up-arrow sits in the same column whatever the figures are");
+eq(statGaps.every(function (g) { return g === statGaps[0]; }), true,
+   "the gap between the two stats never varies with the figures");
+eq(statGaps[0], 2, "and it is just the separator");
+
+// Compact form: same treatment, "768K" with nothing between arrow and figure.
+eq(barCell("\u2193", 786432, true).substring(0, 5), "\u2193768K", "the compact figure starts right after the arrow");
+eq(barCell("\u2193", 0, true).charAt(1) === " ", false, "nothing between arrow and compact figure");
+
+// No reading yet: still a full-width cell, so the first sample does not resize
+// the widget out from under the layout.
+eq(barCell("\u2193", -1).length, ctx.barCellWidth(false), "a rate with no reading is still a full cell");
+eq(barCell("\u2193", NaN).length, ctx.barCellWidth(false), "a non-finite rate is still a full cell");
+
+// fmtSpeed itself is untouched by all of this -- the tooltip and the dropdown
+// share it and want their unit column pinned.
+eq(ctx.fmtSpeed(0).substring(0, 5), "     ", "the padded formatter is still left-padded");
+eq(ctx.fmtSpeed(0, false).length, 12, "the padded cell is unchanged");
+eq(ctx.fmtSpeed(0, true).length, 5, "the padded compact cell is unchanged");
+eq(ctx.fmtSpeed(0).substring(7), "B/s  ", "the padded unit column is unchanged");
+// The bare form is the same text with only the padding removed.
+eq(ctx.fmtSpeedBare(0), "0 B/s", "the bare form is the padded form minus its padding");
+eq(ctx.fmtSpeedBare(1023.4), "1023 B/s", "bare form, 4-digit figure");
+eq(ctx.fmtSpeedBare(1048000), "1023.4 KiB/s", "bare form, full-width figure");
+eq(ctx.fmtSpeedBare(0, true), "0B", "the bare compact form has no separator either");
+eq(ctx.fmtSpeedBare(-1), "--", "a negative rate has no reading to show");
+eq(ctx.fmtSpeedBare(NaN), "--", "a non-finite rate has no reading to show");
+
 // ------------------------------------------------- unit-promotion rollover
 //
 // A real pre-existing bug: fmtSpeed(1023.9) rendered "1024 B/s", a value in

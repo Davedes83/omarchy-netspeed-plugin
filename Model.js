@@ -343,6 +343,23 @@ function scaleUnits(value, units, promoteAt) {
   return { v: v, u: u }
 }
 
+// Speed with the figure and its unit decided, but neither rendered yet. Both
+// the padded formatters and the bar's bare formatter go through this, so the
+// two can never disagree about what a value is.
+function speedParts(bytesPerSec, compact) {
+  if (compact) {
+    var cUnits = ["B", "K", "M", "G", "T"]
+    var c = scaleUnits(bytesPerSec, cUnits, PROMOTE_AT)
+    // Always a whole number of the chosen unit: the point of the compact form
+    // is fewer characters, and a decimal point is one of them. Promotion still
+    // happens at PROMOTE_AT, so no unit can render a number >= 1024.
+    return { num: String(Math.round(c.v)), unit: cUnits[c.u] }
+  }
+  var units = ["B/s", "KiB/s", "MiB/s", "GiB/s", "TiB/s"]
+  var s = scaleUnits(bytesPerSec, units, PROMOTE_AT)
+  return { num: s.u === 0 ? String(Math.round(s.v)) : s.v.toFixed(1), unit: units[s.u] }
+}
+
 function fmtSpeed(bytesPerSec, compact) {
   // "--" is returned unpadded, deliberately. It is the no-reading case: the
   // bar hides its label entirely until the first sample (BarWidget's `visible:
@@ -351,20 +368,73 @@ function fmtSpeed(bytesPerSec, compact) {
   // exists, and leaving a value that does not alone, is the only combination
   // that is never wrong.
   if (!isFinite(bytesPerSec) || bytesPerSec < 0) return "--"
+  var p = speedParts(bytesPerSec, compact)
   if (compact) {
-    var cUnits = ["B", "K", "M", "G", "T"]
-    var c = scaleUnits(bytesPerSec, cUnits, PROMOTE_AT)
-    // Always a whole number of the chosen unit: the point of the compact form
-    // is fewer characters, and a decimal point is one of them. Promotion still
-    // happens at PROMOTE_AT, so no unit can render a number >= 1024.
-    var cNum = String(Math.round(c.v))
-    return padLeft(cNum, COMPACT_NUM_WIDTH)
-      + padRight(cUnits[c.u], COMPACT_UNIT_WIDTH)
+    return padLeft(p.num, COMPACT_NUM_WIDTH)
+      + padRight(p.unit, COMPACT_UNIT_WIDTH)
   }
-  var units = ["B/s", "KiB/s", "MiB/s", "GiB/s", "TiB/s"]
-  var s = scaleUnits(bytesPerSec, units, PROMOTE_AT)
-  var num = s.u === 0 ? String(Math.round(s.v)) : s.v.toFixed(1)
-  return padLeft(num, SPEED_NUM_WIDTH) + " " + padRight(units[s.u], SPEED_UNIT_WIDTH)
+  return padLeft(p.num, SPEED_NUM_WIDTH) + " " + padRight(p.unit, SPEED_UNIT_WIDTH)
+}
+
+// Width of one bar cell: the arrow, then exactly the fields the padded form
+// above reserves. See fmtSpeedCell for how a cell is laid out inside them.
+var BAR_ARROW_WIDTH = 1
+var BAR_CELL_WIDTH = BAR_ARROW_WIDTH + SPEED_NUM_WIDTH + 1 + SPEED_UNIT_WIDTH
+var BAR_CELL_WIDTH_COMPACT = BAR_ARROW_WIDTH + COMPACT_NUM_WIDTH + COMPACT_UNIT_WIDTH
+
+function barCellWidth(compact) {
+  return compact ? BAR_CELL_WIDTH_COMPACT : BAR_CELL_WIDTH
+}
+
+// A rate as a plain string: figure, separator, unit, and no padding anywhere.
+//
+// fmtSpeed's cell is right-aligned for tables, where a unit column that lines
+// up down the page is the point. Everywhere else the padding is in the way: it
+// puts three blank characters in front of a short figure, and a figure followed
+// by blank space renders as if it were indented. This is what the dropdown's
+// download/upload values use, each of which sits in its own block next to its
+// own glyph rather than in a column with anything.
+function fmtSpeedBare(bytesPerSec, compact) {
+  if (!isFinite(bytesPerSec) || bytesPerSec < 0) return "--"
+  var p = speedParts(bytesPerSec, compact)
+  return compact ? p.num + p.unit : p.num + " " + p.unit
+}
+
+// One bar cell: the arrow, the figure, the separator, the unit.
+//
+// The figure is padded on its RIGHT, into a fixed field, rather than the cell
+// being padded after the unit. Both give a cell of the same width for every
+// figure -- which is the point, since a label that changes width moves
+// everything to its right in the bar -- but they put the slack in different
+// places, and it shows.
+//
+// Padding the cell puts the slack at the end, so the gap between the download
+// half and the upload half is that slack plus the separator between the two
+// cells: five characters of blank for a three-character figure, and the two
+// stats look like they belong to different widgets while the bar spends the
+// width on nothing. Padding the figure instead puts the slack between the
+// figure and its own unit, which is inside the stat, so the gap between the
+// two stats is the separator and nothing else, the same on every sample.
+//
+// The arrow still sits against the figure -- the slack is behind the figure, not
+// in front of it -- so the arrow stays glued to the number it labels. And the
+// figure is still LEFT-aligned, so the figure and its unit never come apart by
+// more than the slack; it is the unit that ends up in a different column from
+// one sample to the next, which reads as the figure growing.
+function fmtSpeedCell(arrow, bytesPerSec, compact) {
+  var num = "--"
+  var unit = ""
+  if (isFinite(bytesPerSec) && bytesPerSec >= 0) {
+    var p = speedParts(bytesPerSec, compact)
+    num = p.num
+    unit = p.unit
+  }
+  // Compact drops both the separator and the /s, so its figure and unit are one
+  // run of characters with nothing to align to: pad the whole run rather than
+  // the figure alone, which would put a gap inside "768K".
+  if (compact) return padRight(arrow + num + unit, barCellWidth(true))
+  return padRight(arrow + padRight(num, SPEED_NUM_WIDTH) + " "
+                  + padRight(unit, SPEED_UNIT_WIDTH), barCellWidth(false))
 }
 
 function fmtBytes(bytes) {
