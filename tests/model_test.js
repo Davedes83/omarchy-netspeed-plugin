@@ -136,7 +136,7 @@ eq(bad.length, 0, "every bar cell is its declared width, for every figure (offen
 // nothing else -- the complaint that started this: the slack used to land in
 // that gap and swallow bar width.
 function statLabel(down, up) {
-  return barCell("\u2193", down) + "  " + barCell("\u2191", up);
+  return barCell("\u2193", down) + " " + barCell("\u2191", up);
 }
 var labelLens = [];
 var upCols = [];
@@ -156,7 +156,38 @@ eq(upCols.every(function (c) { return c === upCols[0]; }), true,
    "the up-arrow sits in the same column whatever the figures are");
 eq(statGaps.every(function (g) { return g === statGaps[0]; }), true,
    "the gap between the two stats never varies with the figures");
-eq(statGaps[0], 2, "and it is just the separator");
+eq(statGaps[0], 1, "and it is just the single-space separator");
+
+// ------------------------------------------------- the shipped default label
+//
+// BarWidget now defaults compactSpeed to on and joins the two cells with one
+// space, because the full form occupies 28 characters -- at bar sizes that is a
+// 200px slot made largely of padding. Anything that reintroduces the blank
+// slack (a wider separator, a padded cell, or compact silently switching off)
+// shows up here as a longer label.
+function defaultLabel(down, up) {
+  return barCell("\u2193", down, true) + " " + barCell("\u2191", up, true);
+}
+eq(defaultLabel(786432, 12288), "\u2193768K  \u219112K  ", "the shipped default label is compact");
+eq(defaultLabel(0, 0).length, 13, "the default label is 13 characters wide");
+var defaultWidths = [];
+var defaultUpCols = [];
+[0, 0.4, 9.9, 99.9, 100, 999.9, 1023.4, 1048000, 1048575, 1048576,
+ 1024 * 1024 * 1024].forEach(function (v) {
+  var l = defaultLabel(v, v);
+  defaultWidths.push(l.length);
+  defaultUpCols.push(l.indexOf("\u2191"));
+});
+eq(defaultWidths.filter(function (w) { return w !== 13; }).length, 0,
+   "the default label never changes width, whatever the figures");
+eq(defaultUpCols.filter(function (c) { return c !== defaultUpCols[0]; }).length, 0,
+   "the default label keeps the up-arrow in one column");
+// The full form is still reachable by setting compactSpeed: false, and it is the
+// same cell BarWidget used before -- this is the regression guard for that path.
+eq(barCell("\u2193", 786432, false) + " " + barCell("\u2191", 12288, false),
+   "\u2193768.0  KiB/s \u219112.0   KiB/s", "full units still available on request");
+eq((barCell("\u2193", 0, false) + " " + barCell("\u2191", 0, false)).length, 27,
+   "the full form is 27 characters when the separator is a single space");
 
 // Compact form: same treatment, "768K" with nothing between arrow and figure.
 eq(barCell("\u2193", 786432, true).substring(0, 5), "\u2193768K", "the compact figure starts right after the arrow");
@@ -258,11 +289,11 @@ for (var c = 0; c < probe.length; c++) {
 }
 eq(compactViolations.join("; "), "", "compact never renders a number >= 1024 in a non-max unit");
 
-// Default OFF: the second argument is optional, and every existing caller that
-// passes only the value keeps the full form. This is what makes the setting
-// opt-in rather than a behaviour change for existing users.
+// The formatter's second argument is optional, and omitting it keeps the full
+// form. The widget decides which form to ask for (it now asks for compact by
+// default); this is only the formatter's own default.
 eq(ctx.fmtSpeed(768 * 1024), ctx.fmtSpeed(768 * 1024, false),
-   "compactSpeed absent renders exactly like compactSpeed false");
+   "an omitted compact argument renders exactly like compact false");
 eq(ctx.fmtSpeed(768 * 1024, false), " 768.0 KiB/s", "the full form is unchanged when off");
 eq(ctx.fmtSpeed(768 * 1024, false).length, 12, "the full form keeps its 12-character cell");
 

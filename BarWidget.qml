@@ -31,14 +31,15 @@ BarWidget {
   // default) means "every non-virtual interface"; see Model.VIRTUAL_IFACE_RE
   // for what counts as virtual.
   readonly property var ifaceAllow: Model.ifaceAllowList(setting("interfaces"))
-  // Short unit form in the bar ("768K" instead of "768.0 KiB/s"). Opt-in: the
-  // default is the full form, so nothing changes for anyone who has never
-  // asked. shell.json gives booleans as real JSON, but a hand-edited config
-  // can carry the string "true", and only an exact true/1 means on -- same
-  // "absent means default" rule the other settings follow.
-  readonly property bool compactSpeed: setting("compactSpeed") === true
-                                       || setting("compactSpeed") === 1
-                                       || setting("compactSpeed") === "true"
+  // Short unit form in the bar ("768K" instead of "768.0 KiB/s"). On by
+  // default: the full form needs 13 characters per stat, which at bar sizes is
+  // a 200px slot of mostly blank padding. An explicit false opts back into the
+  // full units. shell.json gives booleans as real JSON, but a hand-edited
+  // config can carry the string "false", so the check is on the value that
+  // actually means off rather than on "is it on".
+  readonly property bool compactSpeed: setting("compactSpeed") !== false
+                                       && setting("compactSpeed") !== 0
+                                       && setting("compactSpeed") !== "false"
 
   property real lastRx: -1
   property real lastTx: -1
@@ -82,13 +83,13 @@ BarWidget {
   //
   // The cell is a fixed width, which is the part that has to hold: the label must
   // not resize between samples or everything to its right in the bar moves. The
-  // slack that buys that goes between the figure and its own unit rather than
-  // after the unit, so the gap between the download half and the upload half is
-  // the separator below and nothing else -- the same on every sample, instead of
-  // swallowing five characters of bar on a short figure.
+  // compact cell is arrow + four figure characters + one unit character, and the
+  // single space between the halves is the only separator, so the whole label is
+  // 13 characters wide instead of the full form's 27 -- a bar slot rather than a
+  // third of the bar. The full form is still one explicit setting away.
   readonly property string label: ready
     ? Model.fmtSpeedCell("\u2193", smoothDown, compactSpeed)
-      + "  "
+      + " "
       + Model.fmtSpeedCell("\u2191", smoothUp, compactSpeed)
     : ""
 

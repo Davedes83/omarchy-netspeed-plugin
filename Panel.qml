@@ -113,8 +113,12 @@ Panel {
   property int hoverApp: -1
 
   readonly property bool wifi: root.info.wifiSsid !== undefined && root.info.wifiSsid !== ""
-  readonly property string heroDown: hostWidget ? hostWidget.cachedDownSpeedStr : "--"
-  readonly property string heroUp: hostWidget ? hostWidget.cachedUpSpeedStr : "--"
+  // The hero always spells the unit out, whatever the bar label is set to:
+  // compactSpeed applies to the 13-character bar slot, not to a panel with room
+  // for the exact figure. Re-formatting from the raw smoothed values keeps that
+  // independent of the bar's setting.
+  readonly property string heroDown: hostWidget ? Model.fmtSpeedBare(hostWidget.smoothDown) : "--"
+  readonly property string heroUp: hostWidget ? Model.fmtSpeedBare(hostWidget.smoothUp) : "--"
   readonly property string totalDown: hostWidget ? hostWidget.cachedTotalRxStr : "--"
   readonly property string totalUp: hostWidget ? hostWidget.cachedTotalTxStr : "--"
   readonly property string sessionDownStr: hostWidget ? Model.fmtBytes(hostWidget.sessionDown) : "--"
