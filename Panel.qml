@@ -105,6 +105,15 @@ Panel {
   property var appCum: ({})          // pid -> { name, down, up }
   property var appRows: []           // [{pid, name, down, up, conns, rateDown, rateUp}]
   property real lastSSAt: 0
+  // The in-flight ss read: one stream state per poll, fed line by line by
+  // ssLine. Held here rather than parsed from a collected blob because the read
+  // is now incremental and can be stopped part-way.
+  property var ssStream: null
+  // Set when a poll hit SS_MAX_ROWS and was stopped early, so the per-app
+  // section can say the figures are a sample instead of presenting them as the
+  // whole picture. Sticky for the life of the popup: the condition describes
+  // the machine, and clearing it on one lucky poll would make the note flicker.
+  property bool ssTruncated: false
 
   // Index of the hovered per-app row. The rows are CursorSurfaces, so the
   // highlight chrome (fill + border) is the shell's shared hover-cursor spec
@@ -146,7 +155,12 @@ Panel {
     pollInfo()
   }
 
-  function refreshSS() { if (!ssProc.running) ssProc.running = true }
+  function refreshSS() {
+    if (ssProc.running) return
+    // A fresh stream state per poll, carrying the previous poll's baselines.
+    root.ssStream = Model.ssState(root.prevConn)
+    ssProc.running = true
+  }
   function pollInfo() { if (!routeProc.running) routeProc.running = true }
 
   function runNmcli() {
@@ -161,12 +175,35 @@ Panel {
 
   // ---- data handlers ----------------------------------------------------
 
-  function onSS(text) {
+  // One line of `ss` output. The row cap is enforced HERE, on this side of the
+  // pipe, because `ss` will not bound its own output: once SS_MAX_ROWS sockets
+  // have been attributed the process is killed and the rest of the stream is
+  // never read. Without this the amount of work per poll would be set by how
+  // many established sockets exist on the machine, including sockets owned by
+  // accounts whose rows are thrown away for having no `users:` attribution.
+  function ssLine(line) {
     if (!root.appCum || !root.prevConn) return  // torn down mid hot-reload
+    var st = root.ssStream
+    if (!st) return
+    Model.ssLineStep(line, st)
+    if (st.rows < Model.SS_MAX_ROWS) return
+    // Cap reached: stop the producer, note the partial reading, finalise. 15 is
+    // SIGTERM; the shell uses the literal everywhere (Quickshell exposes no
+    // signal constants to QML).
+    if (ssProc.running) ssProc.signal(15)
+    root.ssTruncated = true
+    root.finishSSStream(st)
+  }
+
+  // Fold a completed stream into the retained session totals and emit the rows.
+  // Called once per poll, either when the process exited or when the cap stopped
+  // it; `root.ssStream` is cleared so a straggling line cannot double-count.
+  function finishSSStream(st) {
+    root.ssStream = null
     var now = Date.now()
     var dt = root.lastSSAt > 0 ? Math.max(now - root.lastSSAt, 1) : root.ssPollMs
     root.lastSSAt = now
-    var res = Model.parseSS(text, root.prevConn)
+    var res = Model.finishSS(st)
     root.prevConn = res.next
 
     // One pass to fold this poll into the retained session totals, keeping the
@@ -263,11 +300,22 @@ Panel {
     // is established, and the unfiltered listing emits a full info line per
     // socket in every state, which is the most expensive thing this plugin
     // runs.
+    //
+    // Read through a SplitParser, not a StdioCollector. The socket table is
+    // shared by every account in the network namespace, so the amount `ss` can
+    // emit is not bounded by what this widget reports, and iproute2 `ss` has no
+    // output-size option to ask for a smaller one. A collector would therefore
+    // buffer the whole stream -- including rows that are discarded on sight for
+    // having no `users:` attribution -- and only hand it over at exit. Reading
+    // line by line lets this side stop: see ssLine, which kills the process and
+    // stops counting once SS_MAX_ROWS sockets have been attributed.
     command: ["ss", "-tinp", "state", "established"]
-    stdout: StdioCollector {
-      waitForEnd: true
-      onStreamFinished: root.onSS(text)
+    stdout: SplitParser {
+      onRead: function(line) { root.ssLine(line) }
     }
+    // The normal end of a poll is the process exiting; the cap path finalises
+    // early in ssLine and clears ssStream, so this is a no-op for it.
+    onExited: if (root.ssStream) root.finishSSStream(root.ssStream)
   }
 
   Process {
@@ -1018,6 +1066,21 @@ Panel {
               text: "Bytes attributed from live TCP sockets, sampled every "
                 + root.ssPollLabel + ". Totals are this session."
               color: root.textDim3
+              font.family: root.contentFontFamily
+              font.pixelSize: Style.font.caption
+              wrapMode: Text.WordWrap
+            }
+            // Shown only when a poll hit the row cap and was stopped early. The
+            // socket table is shared by every account on the machine, so the
+            // reading is bounded on this side; when the bound bites, the honest
+            // thing is to label the figures a sample rather than let them read
+            // as the complete picture.
+            Text {
+              visible: root.ssTruncated
+              width: parent.width
+              text: "Showing the first " + Model.SS_MAX_ROWS
+                + " socket rows — the socket table is shared, and this reading is capped."
+              color: Color.urgent
               font.family: root.contentFontFamily
               font.pixelSize: Style.font.caption
               wrapMode: Text.WordWrap

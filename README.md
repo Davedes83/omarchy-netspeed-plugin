@@ -71,6 +71,8 @@ No additional packages are required. The widget reads `/proc/net/dev` directly a
 
 If a command is unavailable, the widget degrades gracefully and simply omits that section. Only the download/upload figures in the bar require no external command at all.
 
+Per-app usage is attributed from the TCP socket table, which is shared by every account on the machine rather than being private to you. The widget therefore stops reading `ss` once it has attributed its own sockets, so the work the dropdown does stays the same on a busy shared machine as on an idle one; if that ceiling is ever reached, the per-app section says so.
+
 ## Usage
 
 The widget appears in the right section of your bar by default. No configuration needed—it works out of the box.

@@ -233,50 +233,97 @@ function parseNmcli(text) {
 var SS_PROC_RE = /users:\(\(\"([^"]*)",\s*pid=(\d+),\s*fd=(\d+)\)\)/
 var SS_INFO_RE = /bytes_sent:(\d+).*?bytes_received:(\d+)/i
 
-// `prev` maps "pid|local|remote|fd" -> { sent, recv } from the last poll.
-// Returns the deltas per process and the next map to feed forward.
+// The socket row cap. This is the plugin's own ceiling, not the producer's:
+// iproute2 `ss` has no output-size option (`-b` is `--bpf`, root-only, and
+// unrelated), so the only way to bound the work is to stop READING. The socket
+// table is machine-wide -- any local account in the shared network namespace can
+// open established sockets -- and every row costs a split and a regex scan even
+// when it is discarded for having no `users:` attribution. Counting rows here
+// means the shell's work per poll is proportional to this constant rather than
+// to whatever the rest of the machine is doing.
+//
+// Chosen well above a busy desktop's established-socket count (this machine
+// idles at ~20) so it never bites in normal use; when it does bite the panel
+// says so rather than quietly under-reporting.
+var SS_MAX_ROWS = 512
+
+// One socket occupies a record LINE (the columns plus `users:(...)`) followed by
+// an info LINE starting with a tab that carries `bytes_sent`/`bytes_received`.
+// Both are needed for one attribution, so the reader carries the previous line
+// forward as `pending` and only emits when it can pair the two.
+//
+// This is deliberately a per-line step rather than a whole-text parse: the
+// panel now feeds it line by line from a SplitParser, which is what lets the
+// reader stop mid-stream once the row cap is reached. Streaming also means no
+// second copy of the output exists as a split array.
+function ssLineStep(line, state) {
+  var text = String(line)
+  var st = state || { pending: null, apps: {}, next: {}, rows: 0 }
+
+  // An info line belongs to the socket row that preceded it.
+  if (st.pending !== null) {
+    var held = st.pending
+    st.pending = null
+    var ii = SS_INFO_RE.exec(text)
+    if (ii) emitSS(held, parseInt(ii[1], 10) || 0, parseInt(ii[2], 10) || 0, st)
+    return st
+  }
+
+  // Otherwise this must be a socket row to be usable at all.
+  if (!SS_PROC_RE.test(text)) return st
+  st.pending = text
+  return st
+}
+
+// Fold one paired socket into the accumulated apps and the baselines.
+function emitSS(rowLine, sent, recv, st) {
+  var pm = SS_PROC_RE.exec(rowLine)
+  var cols = rowLine.substring(0, pm.index).trim().split(/\s+/)
+  // Need at least Recv-Q, Send-Q, Local and Peer ahead of the process group.
+  if (cols.length < 4) return
+  var proc = pm[1]
+  var pid = pm[2]
+  var local = cols[cols.length - 2]
+  var remote = cols[cols.length - 1]
+  var fd = pm[3]
+  var key = pid + "|" + local + "|" + remote + "|" + fd
+  var baseline = st.baseline ? st.baseline[key] : null
+  var dSent = 0
+  var dRecv = 0
+  if (baseline && sent >= baseline.sent && recv >= baseline.recv) {
+    dSent = sent - baseline.sent
+    dRecv = recv - baseline.recv
+  }
+  st.next[key] = { sent: sent, recv: recv }
+  var app = st.apps[pid]
+  if (!app) app = st.apps[pid] = { pid: pid, name: proc, deltaDown: 0, deltaUp: 0, conns: 0 }
+  app.deltaDown += dRecv
+  app.deltaUp += dSent
+  app.conns++
+  st.rows++
+}
+
+function ssState(prev) {
+  return { pending: null, apps: {}, next: {}, rows: 0, baseline: prev || {} }
+}
+
+// Finalise a stream of `ss` lines into the same shape parseSS has always
+// returned. Kept as the batch entry point (and the shape the tests exercise);
+// the panel drives ssLineStep directly so it can stop at the cap.
 function parseSS(text, prev) {
   var lines = String(text).split("\n")
-  var apps = {}
-  var next = {}
-  for (var i = 0; i < lines.length; i++) {
-    var pm = SS_PROC_RE.exec(lines[i])
-    if (!pm) continue  // no process attribution (foreign/root sockets, headers)
-    var cols = lines[i].substring(0, pm.index).trim().split(/\s+/)
-    // Need at least Recv-Q, Send-Q, Local and Peer ahead of the process group.
-    if (cols.length < 4) continue
-    var proc = pm[1]
-    var pid = pm[2]
-    var local = cols[cols.length - 2]
-    var remote = cols[cols.length - 1]
-    var fd = pm[3]
-    var sent = 0
-    var recv = 0
-    if (i + 1 < lines.length) {
-      var ii = SS_INFO_RE.exec(lines[i + 1])
-      if (ii) {
-        sent = parseInt(ii[1], 10) || 0
-        recv = parseInt(ii[2], 10) || 0
-      }
-    }
-    var key = pid + "|" + local + "|" + remote + "|" + fd
-    var baseline = prev ? prev[key] : null
-    var dSent = 0
-    var dRecv = 0
-    if (baseline && sent >= baseline.sent && recv >= baseline.recv) {
-      dSent = sent - baseline.sent
-      dRecv = recv - baseline.recv
-    }
-    next[key] = { sent: sent, recv: recv }
-    var app = apps[pid] || (apps[pid] = { pid: pid, name: proc, deltaDown: 0, deltaUp: 0, conns: 0 })
-    app.deltaDown += dRecv
-    app.deltaUp += dSent
-    app.conns++
-  }
+  var st = ssState(prev)
+  for (var i = 0; i < lines.length; i++) ssLineStep(lines[i], st)
+  return finishSS(st)
+}
+
+function finishSS(st) {
   var list = []
-  for (var k in apps) list.push(apps[k])
+  for (var k in st.apps) list.push(st.apps[k])
   list.sort(function(a, b) { return (b.deltaDown + b.deltaUp) - (a.deltaDown + a.deltaUp) })
-  return { apps: list, next: next }
+  // `rows` is how many sockets were actually attributed, so the caller can tell
+  // a complete reading from one that ran into the row cap.
+  return { apps: list, next: st.next, rows: st.rows }
 }
 
 // ------------------------------------------------------------- formatting

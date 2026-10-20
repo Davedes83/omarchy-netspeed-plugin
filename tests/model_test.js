@@ -314,6 +314,80 @@ eq(ctx.fmtBytes(-1), "--", "a negative byte count is the placeholder");
 eq(ctx.fmtBytes(NaN), "--", "NaN bytes is the placeholder");
 eq(ctx.fmtBytes(0), "     0 B    ", "zero bytes is a real reading");
 
+// ------------------------------------------------------ bounded ss streaming
+//
+// The socket table is machine-wide, so the number of rows `ss` can emit is not
+// bounded by what this widget reports. `ss` offers no output-size option, so the
+// plugin stops reading at SS_MAX_ROWS instead; these pin that the streaming path
+// the panel now drives agrees with the batch parse and that the cap is a real
+// bound.
+
+// One socket = a record line carrying `users:(...)`, then a tab-indented info
+// line carrying the byte counters.
+function ssRow(pid, fd, local, sent, recv) {
+  return "0      0      " + local + "   1.1.1.1:443   users:((\"app" + pid
+    + "\",pid=" + pid + ",fd=" + fd + "))"
+    + "\n\t bbr bytes_sent:" + sent + " bytes_received:" + recv;
+}
+
+// The batch entry point and the line-by-line path must not disagree: the panel
+// uses the latter, the tests and any whole-text caller use the former.
+var sample = ssRow(11, 3, "10.0.0.1:40001", 500, 900)
+  + "\n" + ssRow(22, 7, "10.0.0.1:40002", 100, 200);
+var batch = ctx.parseSS(sample, {});
+var st = ctx.ssState({});
+sample.split("\n").forEach(function(l) { ctx.ssLineStep(l, st) });
+var streamed = ctx.finishSS(st);
+eq(JSON.stringify(streamed.apps), JSON.stringify(batch.apps),
+   "the streaming path attributes the same apps as the batch parse");
+eq(JSON.stringify(streamed.next), JSON.stringify(batch.next),
+   "the streaming path keeps the same baselines as the batch parse");
+eq(streamed.rows, 2, "two sockets are attributed");
+eq(streamed.apps.length, 2, "both pids appear");
+eq(streamed.apps[0].deltaDown, 0, "the first poll has no baseline, so no delta");
+
+// Deltas across polls: the same socket, more bytes, is the difference.
+var st2 = ctx.ssState(streamed.next);
+var pair2 = ssRow(11, 3, "10.0.0.1:40001", 700, 1400).split("\n");
+ctx.ssLineStep(pair2[0], st2);
+ctx.ssLineStep(pair2[1], st2);
+var second = ctx.finishSS(st2);
+eq(second.apps[0].deltaUp, 200, "deltaUp is the byte difference between polls");
+eq(second.apps[0].deltaDown, 500, "deltaDown is the byte difference between polls");
+
+// The info line is matched to the row BEFORE it, so a row is one attribution.
+var st3 = ctx.ssState({});
+var pair3 = ssRow(1, 1, "10.0.0.1:1", 10, 20).split("\n");
+ctx.ssLineStep(pair3[0], st3);
+ctx.ssLineStep(pair3[1], st3);
+eq(ctx.finishSS(st3).rows, 1, "a row plus its info line is one attribution");
+
+// A bare info line with no preceding row must not invent an attribution.
+var st4 = ctx.ssState({});
+ctx.ssLineStep("\t bytes_sent:99 bytes_received:99", st4);
+eq(ctx.finishSS(st4).rows, 0, "an orphan info line attributes nothing");
+
+// The row cap is the whole point: a stream far larger than the cap is stopped
+// at the cap rather than fully consumed.
+var cap = ctx.SS_MAX_ROWS;
+eq(typeof cap, "number", "SS_MAX_ROWS is exposed for the panel and the notice");
+ok(cap > 0, "the row cap is a positive bound");
+
+var big = [];
+for (var b = 0; b < cap * 3; b++) big.push(ssRow(1000 + b, 3, "10.0.0.1:" + (50000 + b), b, b));
+var linesBig = big.join("\n").split("\n");
+var stBig = ctx.ssState({});
+var consumed = 0;
+for (var q = 0; q < linesBig.length; q++) {
+  ctx.ssLineStep(linesBig[q], stBig);
+  consumed++;
+  if (stBig.rows >= cap) break;
+}
+eq(stBig.rows, cap, "streaming stops at exactly SS_MAX_ROWS sockets");
+ok(consumed < linesBig.length,
+   "stopping at the cap leaves most of the stream unread (read " + consumed
+   + " of " + linesBig.length + ")");
+
 // -------------------------------------------------------------------- done
 
 if (failures.length > 0) {
