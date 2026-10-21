@@ -109,7 +109,7 @@ Edit the widget entry in your `~/.config/omarchy/shell.json`:
 - `interval` (ms) — Sample rate (bar + chart). Lower = more accurate but higher CPU (default: 2000). Clamped to 250–60000 ms; non-numeric or zero/negative values fall back to the default
 - `fontSize` (px) — Widget text size (default: bar caption size). Clamped to 8–28 px
 - `interfaces` — Optional list of interfaces to monitor, e.g. `"enp5s0"` or `["wlan0", "enp5s0"]`. Defaults to every non-virtual interface (see [Excluded Interfaces](#excluded-interfaces)). Listing a virtual interface explicitly is allowed and opts you into counting it
-- `compactSpeed` — Short units in the bar: `↓768K ↑12K` instead of `↓768.0 KiB/s ↑12.5 KiB/s`. **On by default** — the full form needs 27 characters of bar width, most of it padding, which is why the compact label ships as the default. Set it to `false` to get the full units back. The hover tooltip and the dropdown hero always show the full figure either way, so no precision is lost
+- `compactSpeed` — Short units in the bar with one decimal: `↓768.0K ↑12.5K` instead of `↓768.0 KiB/s ↑12.5 KiB/s`. **On by default** — the full form needs 27 characters of bar width, most of it padding, which is why the compact label ships as the default. Set it to `false` to get the full units back. The hover tooltip and the dropdown hero always show the full figure either way, so no precision is lost
 
 ### Per-App Usage notes
 

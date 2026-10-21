@@ -123,7 +123,7 @@ Panel {
 
   readonly property bool wifi: root.info.wifiSsid !== undefined && root.info.wifiSsid !== ""
   // The hero always spells the unit out, whatever the bar label is set to:
-  // compactSpeed applies to the 13-character bar slot, not to a panel with room
+  // compactSpeed applies to the 15-character bar slot, not to a panel with room
   // for the exact figure. Re-formatting from the raw smoothed values keeps that
   // independent of the bar's setting.
   readonly property string heroDown: hostWidget ? Model.fmtSpeedBare(hostWidget.smoothDown) : "--"

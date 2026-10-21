@@ -357,15 +357,20 @@ var SPEED_UNIT_WIDTH = 5
 var SPEED_NUM_WIDTH = 6
 var BYTES_UNIT_WIDTH = 5
 var BYTES_NUM_WIDTH = 6
-// Compact form ("768K") drops the /s, spells the unit as one letter, and shows
-// a whole number of that unit: the request was "768K", not "768.4K", and a
-// figure this short is read at a glance rather than measured, so the decimal
-// is noise. The cell is 5 characters instead of 12. Rounding to whole units
-// costs at most half a unit, which is why the tooltip keeps the full form --
-// see BarWidget's tooltip, which re-formats from the raw values rather than
-// reusing the compact label string.
+// Compact form ("768.0K") drops the /s but keeps one decimal, because a rate
+// read off the bar is a measurement and "45.0K" says more than "45K" at the
+// same glance: 45K could be anything from 44.5 to 45.5. The decimal costs one
+// character, which is why the compact figure field is 5 wide rather than 4, and
+// the cell 7 instead of 6.
+//
+// The one place the decimal cannot fit is the top of a unit's range: 1000-1023
+// needs four integer digits, so 1000.0 is six characters. Those readings fall
+// back to a whole number ("1000", "1023") rather than widening the cell -- a
+// two-character band just under each promotion boundary, where whole units are
+// the honest rendering anyway (the full form does the same, with its own wider
+// field). The tooltip and the dropdown hero keep the exact figure regardless.
 var COMPACT_UNIT_WIDTH = 1
-var COMPACT_NUM_WIDTH = 4
+var COMPACT_NUM_WIDTH = 5
 
 // Promote at 1023.5, not 1024. Promotion has to happen before ROUNDING can
 // push the rendered number across the unit boundary, and the two branches round
@@ -390,6 +395,21 @@ function scaleUnits(value, units, promoteAt) {
   return { v: v, u: u }
 }
 
+// The compact figure: one decimal, in a field that is exactly five characters
+// wide for every reading.
+//
+// One decimal is the point of the form ("45.0K", not "45K"), and it fits in
+// five whenever the integer part is three digits or fewer. At four integer
+// digits -- 1000 to 1023.4, the sliver just below the promotion boundary, where
+// one-decimal rounding would produce "1000.0" and spill out of the cell -- the
+// decimal is dropped instead of the field being widened: "1000", "1023". The
+// value is still correct to the unit, and the rare case cannot resize the bar.
+function compactFigure(v) {
+  var oneDecimal = Math.round(v * 10) / 10
+  if (oneDecimal >= 1000) return String(Math.round(v))
+  return oneDecimal.toFixed(1)
+}
+
 // Speed with the figure and its unit decided, but neither rendered yet. Both
 // the padded formatters and the bar's bare formatter go through this, so the
 // two can never disagree about what a value is.
@@ -397,10 +417,9 @@ function speedParts(bytesPerSec, compact) {
   if (compact) {
     var cUnits = ["B", "K", "M", "G", "T"]
     var c = scaleUnits(bytesPerSec, cUnits, PROMOTE_AT)
-    // Always a whole number of the chosen unit: the point of the compact form
-    // is fewer characters, and a decimal point is one of them. Promotion still
-    // happens at PROMOTE_AT, so no unit can render a number >= 1024.
-    return { num: String(Math.round(c.v)), unit: cUnits[c.u] }
+    // Promotion still happens at PROMOTE_AT, so no unit can render a number at
+    // or above 1024 -- the whole-number fallback tops out at 1023.
+    return { num: compactFigure(c.v), unit: cUnits[c.u] }
   }
   var units = ["B/s", "KiB/s", "MiB/s", "GiB/s", "TiB/s"]
   var s = scaleUnits(bytesPerSec, units, PROMOTE_AT)
@@ -478,7 +497,7 @@ function fmtSpeedCell(arrow, bytesPerSec, compact) {
   }
   // Compact drops both the separator and the /s, so its figure and unit are one
   // run of characters with nothing to align to: pad the whole run rather than
-  // the figure alone, which would put a gap inside "768K".
+  // the figure alone, which would put a gap inside "768.0K".
   if (compact) return padRight(arrow + num + unit, barCellWidth(true))
   return padRight(arrow + padRight(num, SPEED_NUM_WIDTH) + " "
                   + padRight(unit, SPEED_UNIT_WIDTH), barCellWidth(false))

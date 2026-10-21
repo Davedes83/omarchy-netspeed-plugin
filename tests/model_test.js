@@ -96,7 +96,7 @@ function barCell(arrow, bytesPerSec, compact) {
 }
 
 eq(ctx.barCellWidth(false), 13, "the full-form bar cell is arrow + figure + separator + unit");
-eq(ctx.barCellWidth(true), 6, "the compact bar cell drops the separator and the /s");
+eq(ctx.barCellWidth(true), 7, "the compact bar cell drops the separator and the /s, but keeps the decimal");
 eq(barCell("\u2193", 0).length, ctx.barCellWidth(false), "the full-form cell is its declared width");
 eq(barCell("\u2193", 0, true).length, ctx.barCellWidth(true), "the compact cell is its declared width");
 
@@ -128,7 +128,7 @@ for (var v = 0; v <= 2000; v += 0.4) {
 }
 widths.push(barCell("\u2193", 1048576).length);
 widths.push(barCell("\u2193", 1024 * 1024 * 1024).length);
-var bad = widths.filter(function (w) { return w !== 13 && w !== 6; });
+var bad = widths.filter(function (w) { return w !== 13 && w !== 7; });
 eq(bad.length, 0, "every bar cell is its declared width, for every figure (offenders: "
    + bad.slice(0, 5).join(",") + ")");
 
@@ -161,24 +161,26 @@ eq(statGaps[0], 1, "and it is just the single-space separator");
 // ------------------------------------------------- the shipped default label
 //
 // BarWidget now defaults compactSpeed to on and joins the two cells with one
-// space, because the full form occupies 28 characters -- at bar sizes that is a
+// space, because the full form occupies 27 characters -- at bar sizes that is a
 // 200px slot made largely of padding. Anything that reintroduces the blank
 // slack (a wider separator, a padded cell, or compact silently switching off)
 // shows up here as a longer label.
 function defaultLabel(down, up) {
   return barCell("\u2193", down, true) + " " + barCell("\u2191", up, true);
 }
-eq(defaultLabel(786432, 12288), "\u2193768K  \u219112K  ", "the shipped default label is compact");
-eq(defaultLabel(0, 0).length, 13, "the default label is 13 characters wide");
+eq(defaultLabel(786432, 12288), "\u2193768.0K \u219112.0K ", "the shipped default label is compact with one decimal");
+eq(defaultLabel(45 * 1024, 45 * 1024), "\u219345.0K  \u219145.0K ",
+   "a whole-unit rate still reads as a measurement: 45.0K, not 45K");
+eq(defaultLabel(0, 0).length, 15, "the default label is 15 characters wide");
 var defaultWidths = [];
 var defaultUpCols = [];
-[0, 0.4, 9.9, 99.9, 100, 999.9, 1023.4, 1048000, 1048575, 1048576,
- 1024 * 1024 * 1024].forEach(function (v) {
+[0, 0.4, 9.9, 99.9, 100, 999.9, 1023.4, 1000 * 1024, 1023.4 * 1024,
+ 1024 * 1024, 1048575, 1024 * 1024 * 1024].forEach(function (v) {
   var l = defaultLabel(v, v);
   defaultWidths.push(l.length);
   defaultUpCols.push(l.indexOf("\u2191"));
 });
-eq(defaultWidths.filter(function (w) { return w !== 13; }).length, 0,
+eq(defaultWidths.filter(function (w) { return w !== 15; }).length, 0,
    "the default label never changes width, whatever the figures");
 eq(defaultUpCols.filter(function (c) { return c !== defaultUpCols[0]; }).length, 0,
    "the default label keeps the up-arrow in one column");
@@ -189,8 +191,8 @@ eq(barCell("\u2193", 786432, false) + " " + barCell("\u2191", 12288, false),
 eq((barCell("\u2193", 0, false) + " " + barCell("\u2191", 0, false)).length, 27,
    "the full form is 27 characters when the separator is a single space");
 
-// Compact form: same treatment, "768K" with nothing between arrow and figure.
-eq(barCell("\u2193", 786432, true).substring(0, 5), "\u2193768K", "the compact figure starts right after the arrow");
+// Compact form: same treatment, "768.0K" with nothing between arrow and figure.
+eq(barCell("\u2193", 786432, true).substring(0, 6), "\u2193768.0", "the compact figure starts right after the arrow");
 eq(barCell("\u2193", 0, true).charAt(1) === " ", false, "nothing between arrow and compact figure");
 
 // No reading yet: still a full-width cell, so the first sample does not resize
@@ -202,13 +204,13 @@ eq(barCell("\u2193", NaN).length, ctx.barCellWidth(false), "a non-finite rate is
 // share it and want their unit column pinned.
 eq(ctx.fmtSpeed(0).substring(0, 5), "     ", "the padded formatter is still left-padded");
 eq(ctx.fmtSpeed(0, false).length, 12, "the padded cell is unchanged");
-eq(ctx.fmtSpeed(0, true).length, 5, "the padded compact cell is unchanged");
+eq(ctx.fmtSpeed(0, true).length, 6, "the padded compact cell is 6 characters");
 eq(ctx.fmtSpeed(0).substring(7), "B/s  ", "the padded unit column is unchanged");
 // The bare form is the same text with only the padding removed.
 eq(ctx.fmtSpeedBare(0), "0 B/s", "the bare form is the padded form minus its padding");
 eq(ctx.fmtSpeedBare(1023.4), "1023 B/s", "bare form, 4-digit figure");
 eq(ctx.fmtSpeedBare(1048000), "1023.4 KiB/s", "bare form, full-width figure");
-eq(ctx.fmtSpeedBare(0, true), "0B", "the bare compact form has no separator either");
+eq(ctx.fmtSpeedBare(0, true), "0.0B", "the bare compact form keeps the decimal and drops the separator");
 eq(ctx.fmtSpeedBare(-1), "--", "a negative rate has no reading to show");
 eq(ctx.fmtSpeedBare(NaN), "--", "a non-finite rate has no reading to show");
 
@@ -268,22 +270,30 @@ eq(byteViolations.join("; "), "", "fmtBytes never renders a number >= 1024 in a 
 // ------------------------------------------------------------- compact form
 
 // 768 KiB exactly, so the expected figure is checkable by hand.
-eq(ctx.fmtSpeed(768 * 1024, true), " 768K", "compact drops /s and uses one letter");
-eq(ctx.fmtSpeed(768 * 1024, true).length, 5, "compact is a fixed 5-character cell");
+eq(ctx.fmtSpeed(768 * 1024, true), "768.0K", "compact drops /s, keeps one decimal, uses one letter");
+eq(ctx.fmtSpeed(768 * 1024, true).length, 6, "compact is a fixed 6-character cell");
 eq(ctx.fmtSpeed(768 * 1024, true).indexOf("KiB/s"), -1, "compact never spells out the unit");
-eq(ctx.fmtSpeed(0, true).length, 5, "compact zero still fills its cell");
-eq(ctx.fmtSpeed(1048576, true), "   1M", "compact promotes to a single-letter unit");
-eq(ctx.fmtSpeed(1023.9, true), "   1K", "compact honours the same promotion");
-// The widest compact number is 1023 (a 4-digit field); if promotion ever let a
-// 5-digit number through, this would be the assertion that caught it.
-eq(ctx.fmtSpeed(1023.4, true).length, 5, "a 4-digit compact number fills, not overflows, the field");
-eq(ctx.fmtSpeed(1023.4, true), "1023B", "compact pads a 4-digit number to the field");
+eq(ctx.fmtSpeed(0, true).length, 6, "compact zero still fills its cell");
+eq(ctx.fmtSpeed(0, true), "  0.0B", "compact zero keeps its decimal");
+eq(ctx.fmtSpeed(45 * 1024, true), " 45.0K", "a whole-unit rate reads as a measurement: 45.0K, not 45K");
+eq(ctx.fmtSpeed(1048576, true), "  1.0M", "compact promotes to a single-letter unit");
+eq(ctx.fmtSpeed(1023.9, true), "  1.0K", "compact honours the same promotion");
+// The widest compact figure is five characters (three integer digits and one
+// decimal). The four-integer-digit sliver just under the promotion boundary
+// drops the decimal instead, so the field never widens and the number never
+// reaches 1024.
+eq(ctx.fmtSpeed(1023.4, true).length, 6, "a 4-digit compact number fills, not overflows, the field");
+eq(ctx.fmtSpeed(1023.4 * 1024, true), " 1023K", "the sliver below promotion drops the decimal, not the field");
+eq(ctx.fmtSpeed(1000 * 1024, true), " 1000K", "1000 KiB/s renders as 1000K, not an overflowing 1000.0K");
+// One decimal is a real digit, not noise: 45.04 and 45.06 must not collapse.
+eq(ctx.fmtSpeedBare(45.04 * 1024, true), "45.0K", "rounds a rate down to one decimal");
+eq(ctx.fmtSpeedBare(45.06 * 1024, true), "45.1K", "rounds a rate up to one decimal");
 // No unit may render a number >= 1024 here either.
 var compactViolations = [];
 for (var c = 0; c < probe.length; c++) {
   var cr = ctx.fmtSpeed(probe[c], true).trim();
-  var cm = /^([0-9]+)/.exec(cr);
-  var cu = cr.replace(/^[0-9]+\s*/, "");
+  var cm = /^([0-9.]+)/.exec(cr);
+  var cu = cr.replace(/^[0-9.]+\s*/, "");
   if (cu === "T") continue;
   if (cm && parseFloat(cm[1]) >= 1024) compactViolations.push(probe[c] + " -> " + JSON.stringify(cr));
 }

@@ -31,7 +31,7 @@ BarWidget {
   // default) means "every non-virtual interface"; see Model.VIRTUAL_IFACE_RE
   // for what counts as virtual.
   readonly property var ifaceAllow: Model.ifaceAllowList(setting("interfaces"))
-  // Short unit form in the bar ("768K" instead of "768.0 KiB/s"). On by
+  // Short unit form in the bar ("768.0K" instead of "768.0 KiB/s"). On by
   // default: the full form needs 13 characters per stat, which at bar sizes is
   // a 200px slot of mostly blank padding. An explicit false opts back into the
   // full units. shell.json gives booleans as real JSON, but a hand-edited
@@ -85,7 +85,7 @@ BarWidget {
   // not resize between samples or everything to its right in the bar moves. The
   // compact cell is arrow + four figure characters + one unit character, and the
   // single space between the halves is the only separator, so the whole label is
-  // 13 characters wide instead of the full form's 27 -- a bar slot rather than a
+  // 15 characters wide instead of the full form's 27 -- a bar slot rather than a
   // third of the bar. The full form is still one explicit setting away.
   readonly property string label: ready
     ? Model.fmtSpeedCell("\u2193", smoothDown, compactSpeed)
@@ -296,7 +296,7 @@ BarWidget {
       if (!root.ready) return ""
       // The headline re-formats from the raw smoothed values rather than reusing
       // the cached label strings, because those follow `compactSpeed`. The bar
-      // may be showing "768K"; the tooltip is where the exact figure stays
+      // may be showing "768.0K"; the tooltip is where the exact figure stays
       // available, so it always spells the unit out. It also carries the
       // per-interface lines, which were already full-form for the same reason.
       var tip = "\u2193 " + Model.fmtSpeed(root.smoothDown) + "   \u2191 " + Model.fmtSpeed(root.smoothUp)
